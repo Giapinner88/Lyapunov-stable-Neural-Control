@@ -1,0 +1,15 @@
+(declare-const X_0 Real)
+(declare-const X_1 Real)
+(declare-const Y_0 Real)
+(declare-const Y_1 Real)
+
+(assert (<= X_0 3.141592653589793))
+(assert (>= X_0 -3.141592653589793))
+(assert (<= X_1 8.0))
+(assert (>= X_1 -8.0))
+
+; Y_0 = V(x) <= rho
+(assert (<= Y_0 3.271312561035156))
+
+; Y_1 = F(x) > 0 (Vi phạm)
+(assert (> Y_1 0.0))

@@ -2,11 +2,15 @@ import torch
 import numpy as np
 import matplotlib.pyplot as plt
 
-# Giả định các module đã được import từ thư mục dự án
-# from core.systems import InvertedPendulum
-# from core.models import Controller, LyapunovNetwork
-# from synthesis.attacks import PGDAttacker
-# from synthesis.trainer import CEGISTrainer
+import sys
+import os
+
+current_dir = os.path.dirname(os.path.abspath(__file__))
+parent_dir = os.path.dirname(current_dir)
+sys.path.append(parent_dir)
+
+from core.systems import InvertedPendulum
+from core.models import Controller, LyapunovNetwork
 
 def plot_lyapunov_analysis(system, controller, lyapunov, rho, epoch):
     """
@@ -47,7 +51,7 @@ def plot_lyapunov_analysis(system, controller, lyapunov, rho, epoch):
     # 1. Biểu đồ Đường mức V(x) (Lyapunov Level Sets)
     ax1 = axes[0]
     contour1 = ax1.contourf(Theta, DotTheta, V_map, levels=50, cmap='viridis')
-    plt.colorbar(contour1, ax=ax1, label='V(x)')
+    fig.colorbar(contour1, ax=ax1, label='V(x)')
     # Vẽ ranh giới ROA được chứng nhận (Certified ROA boundary)
     ax1.contour(Theta, DotTheta, V_map, levels=[rho], colors='red', linewidths=3)
     ax1.plot(0, 0, 'r*', markersize=10) # Gốc tọa độ
@@ -60,7 +64,7 @@ def plot_lyapunov_analysis(system, controller, lyapunov, rho, epoch):
     # Thiết lập màu: Đỏ (Vi phạm: F > 0), Xanh (An toàn: F < 0)
     vmax = max(abs(F_map.min()), abs(F_map.max()))
     contour2 = ax2.contourf(Theta, DotTheta, F_map, levels=50, cmap='RdBu_r', vmin=-vmax, vmax=vmax)
-    plt.colorbar(contour2, ax=ax2, label='F(x)')
+    fig.colorbar(contour2, ax=ax2, label='F(x)')
     # Hiển thị lại ranh giới ROA để đối chiếu
     ax2.contour(Theta, DotTheta, V_map, levels=[rho], colors='black', linewidths=2, linestyles='dashed')
     ax2.set_title(r"Lyapunov Derivative Formulation $F(x)$")
@@ -70,23 +74,32 @@ def plot_lyapunov_analysis(system, controller, lyapunov, rho, epoch):
     plt.tight_layout()
     plt.show()
 
-# --- Giả lập Quá trình chạy thử (Dummy Runner) ---
-def run_test():
-    print("Khởi tạo hệ thống và mạng nơ-ron...")
-    # Khởi tạo mô hình
-    # sys = InvertedPendulum()
-    # ctrl = Controller()
-    # lyap = LyapunovNetwork()
+# --- Phân tích Trực quan Hệ thống đã Huấn luyện ---
+def run_visualization():
+    print("Đang khởi tạo cấu trúc hệ thống...")
+    sys = InvertedPendulum()
+    ctrl = Controller(x_dim=2, u_dim=1)
+    lyap = LyapunovNetwork(x_dim=2)
     
-    rho_current = 0.1 # Bắt đầu với ROA nhỏ
+    # Lấy dữ liệu từ vòng lặp CEGIS số 5 (Theo log bạn vừa cung cấp)
+    iter_num = 5
+    rho_target = 1.6485 
     
-    print("Vẽ trạng thái khởi tạo ngẫu nhiên (Epoch 0)...")
-    # plot_lyapunov_analysis(sys, ctrl, lyap, rho_current, 0)
+    ctrl_path = f"results/controller_iter_{iter_num}.pth"
+    lyap_path = f"results/lyapunov_iter_{iter_num}.pth"
     
-    # Ở đây bạn sẽ gọi vòng lặp huấn luyện:
-    # trainer.train(epochs=100)
-    
-    print("Vẽ trạng thái sau khi huấn luyện (Epoch 100)...")
-    # plot_lyapunov_analysis(sys, ctrl, lyap, rho_current, 100)
+    # Tải trọng số nếu tồn tại
+    if os.path.exists(ctrl_path) and os.path.exists(lyap_path):
+        print(f"[*] Tải thành công bộ trọng số tại CEGIS Iteration {iter_num}.")
+        ctrl.load_state_dict(torch.load(ctrl_path, weights_only=True))
+        lyap.load_state_dict(torch.load(lyap_path, weights_only=True))
+    else:
+        print("[-] CẢNH BÁO: Không tìm thấy file trọng số trong thư mục results/.")
+        return
+        
+    print(f"Đang nội suy và kết xuất đồ thị tại mức \u03C1 = {rho_target}...")
+    plot_lyapunov_analysis(sys, ctrl, lyap, rho_target, epoch=f"CEGIS Iter {iter_num}")
 
-# run_test()
+# Kích hoạt thực thi
+if __name__ == "__main__":
+    run_visualization()

@@ -13,11 +13,12 @@ class CEGISTrainer:
         self.attacker = attacker
         
         # Siêu tham số
-        self.rho = config.get('rho', 0.1)
+        # Dùng 'rho_init' thay vì 'rho' để khớp với config của file chạy chính
+        self.rho = config.get('rho_init', 0.1) 
         self.kappa = config.get('kappa', 0.1)
         self.epochs = config.get('epochs', 1000)
         self.batch_size = config.get('batch_size', 5000)
-        self.lambda_margin = config.get('lambda_margin', 100.0) # Trọng số nới lỏng
+        self.lambda_margin = config.get('lambda_margin', 100.0)
         
         # Tách biệt Optimizer cho hai mạng để tránh xung đột gradient
         self.opt_ctrl = optim.Adam(self.controller.parameters(), lr=1e-3)
@@ -27,41 +28,39 @@ class CEGISTrainer:
         """
         Tính toán hàm suy hao tổng hợp.
         """
-        # 1. Động lực học tiến (Forward Dynamics)
         u = self.controller(x)
         x_next = self.system(x, u)
         
         v_curr = self.lyapunov(x)
         v_next = self.lyapunov(x_next)
         
-        # 2. Sai số giảm Lyapunov (Lyapunov Derivative Violation)
+        # Sai số giảm Lyapunov (Lyapunov Derivative Violation)
         F_x = v_next - (1 - self.kappa) * v_curr
         
-        # 3. Hàm suy hao nới lỏng (Relaxed Loss)
+        # Hàm suy hao nới lỏng (Relaxed Loss)
         margin = self.lambda_margin * F.relu(v_curr - self.rho)
         loss_lyap = torch.mean(F.relu(F_x - margin))
         
-        # 4. Hàm suy hao hiệu suất (Performance Loss)
-        # Khuyến khích V(x) nhỏ gọn quanh gốc tọa độ và tiết kiệm tín hiệu u
+        # Hàm suy hao hiệu suất (Performance Loss)
         loss_perf = 0.01 * torch.mean(v_curr) + 0.01 * torch.mean(u**2)
         
         total_loss = loss_lyap + loss_perf
         return total_loss, F_x, v_curr
 
-    def train(self):
+    def train(self, epochs=None):
         """
         Thực thi vòng lặp CEGIS.
+        Tham số 'epochs' cho phép ghi đè số lần lặp từ bên ngoài.
         """
-        for epoch in range(self.epochs):
+        # Ưu tiên số epochs được truyền vào từ train_and_verify.py
+        num_epochs = epochs if epochs is not None else self.epochs
+        
+        for epoch in range(num_epochs):
             self.controller.train()
             self.lyapunov.train()
             
             # --- GIAI ĐOẠN 1: TÌM PHẢN VÍ DỤ (SYNTHESIS/ATTACK) ---
-            # Sử dụng PGD để săn lùng các trạng thái vi phạm nghiêm trọng nhất
             x_adv = self.attacker.find_counter_examples(self.batch_size, self.rho)
-            
-            # Trộn thêm nhiễu ngẫu nhiên để duy trì tính tổng quát (Exploration)
-            # Giả định attacker có hàm random_sample
             x_rand = self.attacker.sample_random(self.batch_size // 5) 
             x_train = torch.cat([x_adv, x_rand], dim=0)
             
@@ -77,7 +76,6 @@ class CEGISTrainer:
             
             # --- KIỂM CHỨNG & LOGGING TẠI CHỖ ---
             if epoch % 10 == 0:
-                # Chỉ đánh giá mức độ vi phạm bên trong ROA hiện tại (v_curr < rho)
                 inside_roa_mask = v_curr < self.rho
                 if inside_roa_mask.any():
                     max_violation = torch.max(F_x[inside_roa_mask]).item()
@@ -86,6 +84,6 @@ class CEGISTrainer:
                     max_violation = 0.0
                     safe_ratio = 100.0
                     
-                print(f"Epoch {epoch:04d} | Loss: {loss.item():.4f} | "
+                print(f"Epoch {epoch:04d}/{num_epochs} | Loss: {loss.item():.4f} | "
                       f"Max F(x) in ROA: {max_violation:.4f} | "
                       f"Safe Points: {safe_ratio:.1f}%")

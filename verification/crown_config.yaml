@@ -1,0 +1,9 @@
+model:
+  onnx_path: temp_model.onnx
+specification:
+  vnnlib_path: temp_spec.vnnlib
+solver:
+  batch_size: 1024 # Xử lý song song trên GPU
+bab:
+  branching:
+    method: naive # Hoặc fsb, tùy thuộc vào độ phức tạp
