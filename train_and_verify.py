@@ -1,90 +1,70 @@
 import torch
-import os
-
-# Import các module từ kiến trúc hệ thống
+import logging
 from core.systems import InvertedPendulum
 from core.models import Controller, LyapunovNetwork
 from synthesis.attacks import PGDAttacker
 from synthesis.trainer import CEGISTrainer
-from verification.crown_interface import VerificationWrapper
-from verification.bisection import ROABisector
+from verification.bisection import find_maximum_rho
+
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
 
 def main():
-    print("="*60)
-    print("HỆ THỐNG ĐIỀU KHIỂN NƠ-RON ỔN ĐỊNH LYAPUNOV (CEGIS PIPELINE)")
-    print("="*60)
-
-    # 1. Cấu hình Siêu tham số (Hyperparameters Configuration)
+    # 1. Khởi tạo Không gian và Động học
+    system = InvertedPendulum()
+    controller = Controller()
+    lyapunov = LyapunovNetwork()
+    
+    # 2. Cấu hình Siêu tham số
     config = {
-        'x_dim': 2,
-        'u_dim': 1,
-        'kappa': 0.1,             # Tốc độ giảm năng lượng bắt buộc
-        'rho_init': 0.05,         # ROA mục tiêu ban đầu (rất nhỏ)
-        'epochs_per_cycle': 200,  # Số epoch huấn luyện trước mỗi lần xác minh
-        'batch_size': 2000,
-        'pgd_steps': 15,
-        'pgd_step_size': 0.05,
-        'lambda_margin': 100.0,
-        'max_cegis_iters': 5      # Số lần lặp vòng lặp lớn (Train -> Verify -> Bisection)
+        'rho': 0.1,             # Giá trị ROA khởi điểm
+        'kappa': 0.1,           # Tốc độ giảm năng lượng tối thiểu
+        'epochs': 50,           # Số epoch huấn luyện trong 1 vòng lặp CEGIS
+        'batch_size': 5000,
+        'lambda_margin': 100.0
     }
-
-    # Định nghĩa giới hạn không gian vật lý B (thay đổi tùy hệ thống)
-    # Pendulum: theta thuộc [-pi, pi], dot_theta thuộc [-8, 8]
-    import math
-    x_bounds = [(-math.pi, math.pi), (-8.0, 8.0)]
-    config['state_bounds'] = torch.tensor(x_bounds)
-
-    # 2. Khởi tạo Đồ thị Tính toán (Instantiating the Computational Graph)
-    print("\n[*] Đang khởi tạo mô hình toán học...")
-    system = InvertedPendulum(dt=0.05)
-    controller = Controller(x_dim=config['x_dim'], u_dim=config['u_dim'])
-    lyapunov = LyapunovNetwork(x_dim=config['x_dim'])
-
-    # Khởi tạo các module chuyên trách
+    
     attacker = PGDAttacker(system, controller, lyapunov, config)
     trainer = CEGISTrainer(system, controller, lyapunov, attacker, config)
     
-    # Module đóng gói cho CROWN
-    verifier_wrapper = VerificationWrapper(system, controller, lyapunov, kappa=config['kappa'])
-    bisector = ROABisector(verifier_wrapper, x_bounds, crown_config_path="verification/crown_config.yaml")
-
-    # 3. Vòng lặp CEGIS Cấp cao (Outer CEGIS Loop)
-    current_rho = config['rho_init']
-
-    for cegis_iter in range(1, config['max_cegis_iters'] + 1):
-        print(f"\n{'-'*40}")
-        print(f"VÒNG LẶP CEGIS #{cegis_iter} | MỤC TIÊU ROA (\u03C1) = {current_rho:.4f}")
-        print(f"{'-'*40}")
-
-        # GIAI ĐOẠN A: TỔNG HỢP (SYNTHESIS)
-        print("[+] Giai đoạn 1: Huấn luyện (Synthesis) bằng PGD Attack...")
-        # Cập nhật mức rho mục tiêu cho Trainer
-        trainer.rho = current_rho 
-        trainer.train(epochs=config['epochs_per_cycle'])
-
-        # Lưu trọng số tạm thời
-        os.makedirs("results", exist_ok=True)
-        torch.save(controller.state_dict(), f"results/controller_iter_{cegis_iter}.pth")
-        torch.save(lyapunov.state_dict(), f"results/lyapunov_iter_{cegis_iter}.pth")
-
-        # GIAI ĐOẠN B: XÁC MINH VÀ MỞ RỘNG (VERIFICATION & BISECTION)
-        print("\n[+] Giai đoạn 2: Chứng minh Hình thức (Formal Verification)...")
-        # Sử dụng Bisection để tìm ROA tối đa được chứng nhận cho bộ trọng số hiện tại
-        verified_rho = bisector.find_max_roa(rho_min=0.01, rho_max=current_rho * 2.0)
-
-        if verified_rho >= current_rho:
-            print(f"[*] THÀNH CÔNG: Mạng nơ-ron đã ổn định toàn bộ vùng \u03C1 = {current_rho:.4f}.")
-            # Chiến lược nhồi (Curriculum Learning): Tăng rho mục tiêu cho vòng lặp tiếp theo
-            current_rho = verified_rho + 0.1 
+    MAX_CEGIS_ITERS = 20
+    target_rho = config['rho']
+    
+    for iteration in range(MAX_CEGIS_ITERS):
+        logging.info(f"\n{'='*20} VÒNG LẶP CEGIS {iteration + 1} {'='*20}")
+        logging.info(f"Mục tiêu Huấn luyện: Mở rộng ROA tới rho = {target_rho:.4f}")
+        
+        # --- GIAI ĐOẠN 1: SYNTHESIS (HUẤN LUYỆN) ---
+        trainer.rho = target_rho
+        trainer.train()  # Gọi hàm train() bạn đã viết trong trainer.py
+        
+        # --- GIAI ĐOẠN 2: VERIFICATION (KIỂM CHỨNG HÌNH THỨC) ---
+        logging.info("Kích hoạt α,β-CROWN để bảo chứng miền ROA hiện tại...")
+        controller.eval()
+        lyapunov.eval()
+        
+        # Tìm kiếm giới hạn an toàn thực tế của hệ thống. 
+        # Cận trên (rho_max) được đặt lớn hơn target_rho để kiểm tra xem mạng có học vượt kỳ vọng không.
+        verified_rho = find_maximum_rho(
+            system, controller, lyapunov, 
+            rho_min=0.0, rho_max=target_rho * 1.5, 
+            tolerance=0.05
+        )
+        
+        logging.info(f"-> ROA lớn nhất được CHỨNG NHẬN: rho = {verified_rho:.4f}")
+        
+        # --- GIAI ĐOẠN 3: CẬP NHẬT TRẠNG THÁI (CEGIS FEEDBACK) ---
+        if verified_rho >= target_rho:
+            # Thuật toán thành công trong việc bảo chứng mức rho hiện tại.
+            # Tiến hành mở rộng giới hạn ROA cho vòng lặp tiếp theo.
+            logging.info("Chứng minh thành công! Tăng mục tiêu ROA.")
+            target_rho = verified_rho + 0.2
         else:
-            print(f"[*] CẢNH BÁO: Chỉ chứng minh được đến \u03C1 = {verified_rho:.4f}. Chưa đạt mục tiêu.")
-            # Giữ nguyên hoặc giảm nhẹ rho mục tiêu để mạng học kỹ hơn vùng không gian này
-            current_rho = max(verified_rho, 0.05) + 0.05
-
-    print("\n" + "="*60)
-    print("HOÀN TẤT QUÁ TRÌNH HUẤN LUYỆN VÀ CHỨNG MINH.")
-    print(f"Kích thước ROA (\u03C1) cuối cùng đạt được: {verified_rho:.4f}")
-    print("="*60)
+            # CROWN tìm thấy điểm vi phạm ở target_rho hiện tại.
+            # Mạng cần tiếp tục củng cố vùng hiện tại thay vì mở rộng.
+            logging.info("Chưa đạt mục tiêu. Hệ thống sẽ củng cố trọng số trong vòng lặp tới.")
+            
+            # (Toán học cốt lõi): Tại đây, CROWN đã tìm thấy phản ví dụ. 
+            # Cần bổ sung logic trích xuất các điểm X này từ CROWN để đưa vào bộ đệm của PGDAttacker.
 
 if __name__ == "__main__":
     main()
