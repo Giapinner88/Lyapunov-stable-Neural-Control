@@ -198,6 +198,11 @@ class CEGISLoop:
         bank_capacity: int = 50000,
         bank_storage_device: str = "cpu",
         replay_new_ratio: float = 0.25,
+        violation_margin: float = 5e-4,
+        local_box_radius: float = 0.15,
+        local_box_samples: int = 256,
+        local_box_weight: float = 0.2,
+        equilibrium_weight: float = 0.1,
     ):
         self.dynamics = dynamics
         self.controller = controller
@@ -206,6 +211,11 @@ class CEGISLoop:
         self.optimizer = optimizer
         self.counterexample_bank = CounterexampleBank(bank_capacity, bank_storage_device)
         self.replay_new_ratio = float(replay_new_ratio)
+        self.violation_margin = float(violation_margin)
+        self.local_box_radius = float(local_box_radius)
+        self.local_box_samples = int(local_box_samples)
+        self.local_box_weight = float(local_box_weight)
+        self.equilibrium_weight = float(equilibrium_weight)
 
     def _build_training_batch(self, x_new_bad: torch.Tensor, batch_size: int) -> torch.Tensor:
         """
@@ -284,10 +294,26 @@ class CEGISLoop:
         x_next = self.dynamics.step(x_samples, u)
         V_curr = self.lyapunov(x_samples)
         V_next = self.lyapunov(x_next)
-        lyap_decrease_loss = torch.mean(torch.relu(V_next - (1.0 - alpha_lyap) * V_curr))
+        violation = V_next - (1.0 - alpha_lyap) * V_curr
+        lyap_decrease_loss = torch.mean(torch.relu(violation + self.violation_margin))
+
+        # --- 1.1 LOSS CỤC BỘ GẦN GỐC (ép RoA lõi chặt hơn) ---
+        device = x_samples.device
+        x_local = (torch.rand((self.local_box_samples, self.dynamics.nx), device=device) * 2.0 - 1.0) * self.local_box_radius
+        u_local = self.controller(x_local)
+        x_next_local = self.dynamics.step(x_local, u_local)
+        V_curr_local = self.lyapunov(x_local)
+        V_next_local = self.lyapunov(x_next_local)
+        local_violation = V_next_local - (1.0 - alpha_lyap) * V_curr_local
+        local_decrease_loss = torch.mean(torch.relu(local_violation + self.violation_margin))
+
+        # --- 1.2 LOSS ĐIỂM CÂN BẰNG (giữ điều kiện tại gốc) ---
+        x_zero = torch.zeros((1, self.dynamics.nx), device=device)
+        u_zero = self.controller(x_zero)
+        v_zero = self.lyapunov(x_zero)
+        equilibrium_loss = torch.mean(u_zero ** 2) + torch.mean(v_zero ** 2)
         
         # --- 2. LOSS MỎ NEO LQR (Giữ hình dáng vật lý tại trung tâm) ---
-        device = x_samples.device
         # Sinh một batch nhỏ quanh gốc tọa độ (bán kính 0.1)
         x_small = (torch.rand((128, self.dynamics.nx), device=device) * 2.0 - 1.0) * 0.1
         
@@ -300,9 +326,13 @@ class CEGISLoop:
         V_lqr = torch.einsum("bi,ij,bj->b", x_small, S, x_small).unsqueeze(1)
         loss_v = torch.nn.functional.mse_loss(V_nn, V_lqr)
         
-        # Gộp loss: Diệt điểm mù (trọng số 1.0) + Giữ mỏ neo (trọng số 0.01 - GẢM từ 0.1)
-        # Giảm anchor weight để learner không bị distract, tập trung vào violation
-        loss = lyap_decrease_loss + 0.01 * (loss_u + loss_v)
+        # Gộp loss: diệt vi phạm global + local + giữ cân bằng + mỏ neo LQR
+        loss = (
+            lyap_decrease_loss
+            + self.local_box_weight * local_decrease_loss
+            + self.equilibrium_weight * equilibrium_loss
+            + 0.01 * (loss_u + loss_v)
+        )
         
         loss.backward()
         self.optimizer.step()

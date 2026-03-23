@@ -8,9 +8,11 @@ class NeuralController(nn.Module):
     def __init__(self, nx: int, nu: int, hidden_sizes: list = [64, 64], u_bound: float = 6.0):
         super().__init__()
         self.u_bound = u_bound
+        self.nx = nx
         
         # [BẢN VÁ]: Khởi tạo giới hạn vật lý để chuẩn hóa (Góc 3.14, Vận tốc 8.0)
         self.register_buffer("state_limits", torch.tensor([3.1415, 8.0]))
+        self.register_buffer("origin", torch.zeros(nx), persistent=False)
         
         layers = []
         in_size = nx
@@ -27,7 +29,13 @@ class NeuralController(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         # Ép x vật lý về x_norm nằm trong khoảng [-1, 1] để Tanh không bị bão hòa
         x_norm = x / self.state_limits
-        return self.net(x_norm) * self.u_bound
+        u_raw = self.net(x_norm)
+
+        # Cưỡng bức điều kiện cân bằng chính xác: u(0) = 0.
+        zero_norm = self.origin.unsqueeze(0) / self.state_limits
+        u_origin = self.net(zero_norm).squeeze(0)
+
+        return (u_raw - u_origin) * self.u_bound
 
 
 # ==========================================
@@ -36,6 +44,8 @@ class NeuralController(nn.Module):
 class NeuralLyapunov(nn.Module):
     def __init__(self, nx: int, hidden_sizes: list = [64, 64], eps: float = 0.01):
         super().__init__()
+        if eps <= 0.0:
+            raise ValueError("eps phải > 0 để đảm bảo V(x) dương xác định nghiêm ngặt")
         
         # [BẢN VÁ]: Giới hạn chuẩn hóa
         self.register_buffer("state_limits", torch.tensor([3.1415, 8.0]))
@@ -74,11 +84,10 @@ class NeuralLyapunov(nn.Module):
         Px = torch.matmul(x, P)
         term2 = torch.sum(Px * x, dim=1, keepdim=True)
         
-        # 4. BỨC TỎNG GIỚI HẠN V CÓ KÍCH THƯỚC HỢP LÝ:
-        # Thêm max thấp nhất là 0.01 để đảm bảo V > 0 luôn
-        # và có kích thước thích hợp để gradient PGD có thể hoạt động hiệu quả
+        # 4. Hàm Lyapunov không dùng offset cứng:
+        # term1 >= 0 và term2 > 0 với mọi x != 0 vì P = eps*I + R^T R là SPD (eps > 0).
+        # Do đó V(0) = 0 và V(x) > 0 với mọi x != 0.
         V = term1 + term2
-        V = torch.relu(V) + 0.01
         return V
 
     def load_state_dict(self, state_dict, strict: bool = True):

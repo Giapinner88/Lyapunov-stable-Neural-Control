@@ -94,9 +94,9 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Kiểm tra tương thích RK4 và quét eps cho CROWN bound")
     parser.add_argument("--eps", type=float, default=0.1, help="eps dùng cho run đơn")
     parser.add_argument("--sweep", action="store_true", help="Bật chế độ quét eps")
-    parser.add_argument("--eps-max", type=float, default=0.2, help="eps lớn nhất khi quét")
-    parser.add_argument("--eps-min", type=float, default=0.005, help="eps nhỏ nhất khi quét")
-    parser.add_argument("--steps", type=int, default=15, help="số điểm quét")
+    parser.add_argument("--eps-max", type=float, default=0.08, help="eps lớn nhất khi quét")
+    parser.add_argument("--eps-min", type=float, default=0.001, help="eps nhỏ nhất khi quét")
+    parser.add_argument("--steps", type=int, default=20, help="số điểm quét")
     return parser.parse_args()
 
 if __name__ == "__main__":

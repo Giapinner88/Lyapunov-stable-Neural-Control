@@ -1,12 +1,13 @@
 import torch
 import torch.nn.functional as F
 import torch.optim as optim
+import argparse
 from core.dynamics import PendulumDynamics
 from core.models import NeuralController, NeuralLyapunov
 from core.cegis import CEGISLoop, PGDAttacker
 
 
-def train():
+def train(pretrain_epochs=80, cegis_epochs=250, alpha_lyap=0.08):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Sử dụng thiết bị: {device}")
 
@@ -25,7 +26,7 @@ def train():
     controller = NeuralController(nx=2, nu=1, u_bound=6.0).to(device)
     lyapunov = NeuralLyapunov(nx=2).to(device)
     # TỐI ƯU HÓA PHASE 2: Giảm steps (100→50) vì backward quá chậm
-    attacker = PGDAttacker(dynamics, controller, lyapunov, num_steps=50, step_size=0.04, num_restarts=3)
+    attacker = PGDAttacker(dynamics, controller, lyapunov, num_steps=80, step_size=0.02, num_restarts=6)
     optimizer = optim.Adam(list(controller.parameters()) + list(lyapunov.parameters()), lr=1e-3)
 
     # 3. Khởi tạo CEGIS loop có CounterexampleBank nội bộ
@@ -37,19 +38,24 @@ def train():
         optimizer=optimizer,
         bank_capacity=50000,
         bank_storage_device=device.type,
-        replay_new_ratio=0.25,
+        replay_new_ratio=0.35,
+        violation_margin=5e-4,
+        local_box_radius=0.15,
+        local_box_samples=256,
+        local_box_weight=0.25,
+        equilibrium_weight=0.1,
     )
 
     batch_size = 512  # Giảm từ 1000 → 512
     attack_seed_size = 256  # Giảm từ 500 → 256
     train_batch_size = batch_size
-    learner_updates = 2  # Giảm từ 5 → 2
+    learner_updates = 3
 
     # =========================================================
     # PHASE 1: LQR PRE-TRAINING
     # =========================================================
     print("\n--- BẮT ĐẦU PHASE 1: LQR PRE-TRAINING ---")
-    for epoch in range(100):
+    for epoch in range(pretrain_epochs):
         optimizer.zero_grad()
 
         # Sinh điểm gần gốc để học xấp xỉ vùng cục bộ ổn định.
@@ -75,8 +81,7 @@ def train():
     # PHASE 2: CEGIS LOOP
     # =========================================================
     print("\n--- BẮT ĐẦU PHASE 2: CEGIS LOOP ---")
-    epochs = 300  # Giảm từ 500 → 300 epochs
-    alpha_lyap = 0.05
+    epochs = int(cegis_epochs)
     for epoch in range(epochs):
         total_loss = 0
         bank_size = 0
@@ -117,4 +122,14 @@ def train():
     print("Đã lưu mô hình thành công!")
 
 if __name__ == "__main__":
-    train()
+    parser = argparse.ArgumentParser(description="Huấn luyện Lyapunov-stable controller")
+    parser.add_argument("--pretrain-epochs", type=int, default=80)
+    parser.add_argument("--cegis-epochs", type=int, default=250)
+    parser.add_argument("--alpha-lyap", type=float, default=0.08)
+    args = parser.parse_args()
+
+    train(
+        pretrain_epochs=args.pretrain_epochs,
+        cegis_epochs=args.cegis_epochs,
+        alpha_lyap=args.alpha_lyap,
+    )

@@ -1,163 +1,252 @@
-# THEORY: Lyapunov-stable Neural Control
+# THEORY: Lyapunov-stable Neural Control (Detailed, RK4 Discrete-Time)
 
-Muc tieu cua file nay:
-- Thuat lai chi tiet thuat toan dang xay dung trong repo.
-- Lien ket giua ly thuyet va implementation hien tai.
-- Tong hop tai lieu tham khao trong thu muc docs de lam co so cho cac buoc tiep theo.
-
----
-
-## 1) Bai toan
-
-Ta xet he phi tuyen roi rac:
-
-$$
-x_{t+1} = f(x_t, u_t), \quad u_t = \pi_\theta(x_t)
-$$
-
-Muc tieu la hoc dong thoi:
-- Controller neural network $\pi_\theta(x)$.
-- Lyapunov neural network $V_\phi(x)$.
-
-Sao cho dieu kien giam Lyapunov dung trong mot mien lon nhat co the:
-
-$$
-V(x_{t+1}) - (1-\alpha)V(x_t) \le 0, \quad \alpha \in (0,1)
-$$
-
-Neu dieu kien tren dung trong mot tap con cua khong gian trang thai, tap do la ung vien ROA (region of attraction) duoc chung minh.
+Muc tieu cua tai lieu nay:
+- Chot ly thuyet dang dung trong code hien tai.
+- Lam ro cac bat bien can giu giua train va verify.
+- Tong hop cac loi da gap, nguyen nhan goc, va cach sua da ap dung.
 
 ---
 
-## 2) Nen tang tham khao tu docs
+## 1) Bai toan va mo hinh roi rac
 
-Tai lieu trong docs:
-- docs/2404.07956v2.pdf
+Ta chung minh on dinh cho he da lay mau:
 
-Y chinh rut ra va ap dung cho repo nay:
-- Hoc dong thoi policy va Lyapunov certificate.
-- Dung falsification nhanh (PGD attacker) de tim phan vi du.
-- Dung regularization va thiet ke bai toan huan luyen de mo rong mien co the chung minh.
-- Hau kiem (post-hoc verification) la buoc quan trong de chuyen tu ket qua thuc nghiem sang bao dam hinh thuc.
+$$
+x_{k+1} = \Phi(x_k, u_k), \quad u_k = \pi_\theta(x_k)
+$$
 
-Noi dung hien tai cua repo tap trung vao phan synthesis/training:
-- LQR pre-training de tao khoi tao on dinh gan diem can bang.
-- CEGIS voi attacker va Counterexample Bank de lien tuc mo rong mien on dinh empirically.
+Trong repo nay, $\Phi$ la map roi rac sinh boi bo tich phan RK4 tu he lien tuc:
+
+$$
+\dot x = f_c(x,u), \qquad
+\Phi(x,u) = \text{RK4}(f_c, x, u, dt)
+$$
+
+Ly do dung he roi rac:
+- Controller duoc trien khai theo chu ky lay mau.
+- Verifier va huan luyen deu thao tac one-step tren $x_k \to x_{k+1}$.
 
 ---
 
-## 3) Cau truc mo hinh hien tai
+## 2) Dieu kien Lyapunov roi rac dang su dung
 
-1. Dynamics:
-- PendulumDynamics voi bo tich phan RK4.
-- Dynamics ke thua nn.Module de dong bo device bang to(device).
-
-2. Controller:
-- NeuralController sinh luc dieu khien, co gioi han bien do dau ra bang tanh va u_bound.
-
-3. Lyapunov network:
-- NeuralLyapunov xay dung dang:
+Dieu kien muc tieu:
 
 $$
-V(x)=\|\phi_V(x)-\phi_V(0)\|_1 + x^T(\epsilon I + R^T R)x
+V(x_{k+1}) - (1-\alpha)V(x_k) \le 0, \quad \alpha \in (0,1)
 $$
 
-- Thanh phan thu hai dam bao tinh positive-definite co cau truc.
+Tuong duong:
 
-4. Attacker:
-- PGD theo chuan L-infinity voi cap nhat theo dau gradient.
-- Co multi-restart va seed strategy de giam ket o cuc dai gia.
+$$
+V(x_{k+1}) - V(x_k) + \rho V(x_k) \le 0, \quad \rho = \alpha
+$$
 
-5. Learner + Bank:
-- Counterexample Bank luu x_bad cua nhieu epoch.
-- Moi buoc hoc dung batch tron loi moi va loi cu.
+Trong verifier, dai luong duoc kiem la:
+
+$$
+	ext{violation}(x) = V(x_{k+1}) - V(x_k) + \rho V(x_k)
+$$
+
+Y nghia:
+- Neu upper bound cua violation < 0 tren mot hop, hop do duoc chung minh an toan.
+- Neu upper bound > 0, co the la vi pham that, hoac bound con bao thu.
 
 ---
 
-## 4) Thuat toan huan luyen 2 phase
+## 3) Kien truc V(x) va bao dam nghiem ngat
 
-### Phase 1: LQR pre-training (local warm start)
+Dang V trong code:
 
-Muc tieu:
-- Day controller giong hanh vi LQR quanh goc.
-- Day Lyapunov network xap xi dang bac hai tu ma tran S cua Riccati.
+$$
+V(x)=\|\phi_V(x)-\phi_V(0)\|_1 + x^T P x, \quad P=\epsilon I + R^T R
+$$
 
-Buoc hoc:
-1. Mau x_small trong ban kinh nho quanh goc.
-2. Tinh u_lqr = -Kx, kep theo gioi hanh dieu khien vat ly.
-3. Toi uu tong loss:
+Voi $\epsilon>0$, ma tran $P$ la SPD. He qua:
+- $V(0)=0$.
+- $V(x)>0$ voi moi $x\neq 0$.
+
+Luu y quan trong:
+- Da bo hoan toan offset cong hang cuoi mang (kieu +c).
+- Khong dung ReLU o dau ra V de tranh tao nen duong gia.
+
+---
+
+## 4) Dieu kien can bang tai goc cho controller
+
+De tranh day he ra khoi diem can bang, code controller da cuong buc:
+
+$$
+u(x)=\big(\hat u(x)-\hat u(0)\big)\,u_{bound}
+$$
+
+Nen $u(0)=0$ dung chinh xac, khong phu thuoc vao sai so hoc cua trong so.
+
+Tac dung:
+- Giam nguy co $x=0$ bi day sang trang thai khac sau 1 buoc RK4.
+- Giu chat che dieu kien violation tai tam hop verify.
+
+---
+
+## 5) Train pipeline hien tai (2 phase + CEGIS)
+
+### Phase 1: LQR pretraining
+- Hoc controller theo LQR quanh goc.
+- Hoc V theo dang bac hai $x^T S x$ quanh goc.
+
+Loss:
 
 $$
 \mathcal{L}_{pre} = \text{MSE}(u_{nn},u_{lqr}) + \text{MSE}(V_{nn},x^TSx)
 $$
 
-Y nghia:
-- Tao khoi tao tot, giup Phase 2 on dinh hon va nhanh hon.
+### Phase 2: CEGIS
+- Attacker (PGD, multi-restart) tim diem vi pham.
+- Counterexample Bank luu loi moi + loi cu.
+- Learner toi uu tren batch tron de tranh quen loi.
 
-### Phase 2: CEGIS loop voi Counterexample Bank
-
-Muc tieu:
-- Tim va va cac diem vi pham manh nhat theo vung dang hoc.
-
-Vong lap moi epoch:
-1. Attacker nhan x_seed, toi uu de cuc dai hoa:
+Loss chinh trong learner:
 
 $$
-	ext{violation}(x)=V(x_{next})-(1-\alpha)V(x)
+\mathcal{L}_{global}=\mathbb{E}[\text{ReLU}(\text{violation}+m)]
 $$
 
-2. Nop x_bad vao Counterexample Bank.
-3. Learner lay batch tron (moi + cu) tu bank, toi uu:
-
-$$
-\mathcal{L}_{lyap}=\mathbb{E}[\text{ReLU}(V(x_{next})-(1-\alpha)V(x))]
-$$
-
-4. Lap lai cho den khi loss nho va bank bao hoa theo suc chua.
+Da them thanh phan moi de ep verify tot hon:
+- Local-box decrease loss quanh goc.
+- Equilibrium loss tai goc ($u(0)$ va $V(0)$).
+- Violation margin $m>0$ de tang do chat dieu kien.
 
 ---
 
-## 5) Vi sao can Counterexample Bank
+## 6) Verify pipeline hien tai
 
-Neu chi hoc tren loi moi cua epoch hien tai, mo hinh de quen loi cu (catastrophic forgetting).
+Script test_verifier da ho tro 2 che do:
+- Chay don 1 eps.
+- Quet eps de tim nguong upper bound am.
 
-Counterexample Bank giai quyet viec do bang cach:
-- Giu lich su phan vi du kho.
-- Tron phan vi du moi + cu trong moi buoc hoc.
-- Tao curriculum tu dong: loi de duoc xu ly som, loi kho con lai trong bank se tiep tuc duoc phat hien va sua.
-
----
-
-## 6) Cac bat bien implementation can giu
-
-1. Muc tieu cua attacker va learner phai dong nhat theo cung alpha.
-2. Dynamics, models, seeds, va bounds phai cung device.
-3. Khi doi architecture Lyapunov, phai kiem tra lai:
-- Shape cua tat ca Linear layers.
-- Tinh toan phi_V(0) voi shape dung va khong can graph gradient.
-4. Log training can theo doi dong thoi:
-- LQR pretrain loss.
-- Violation loss.
-- Kich thuoc Counterexample Bank.
+Nguyen tac doc ket qua:
+- UB < 0: chung minh thanh cong cho hop dang xet.
+- UB > 0: chua chung minh duoc. Can phan tich tiep:
+	- Sampling co vi pham that hay khong.
+	- Hoac bound CROWN bao thu do hop qua lon, phi tuyen manh.
 
 ---
 
-## 7) Lo trinh tiep theo
+## 7) Cac loi da gap va cach sua (postmortem)
 
-1. Verification hinh thuc:
-- Ket noi quy trinh hau kiem voi bo verifier trong verification.
-- Dinh nghia ro mien can chung minh va cach trich ROA.
+### Loi 1: khoi tao Lyapunov thieu tham so
+Trieu chung:
+- TypeError khi tao NeuralLyapunov.
 
-2. Nang cap attacker:
-- Priority replay theo muc violation.
-- Adaptive step size va so restart theo giai doan training.
+Nguyen nhan:
+- Constructor can nx nhung test tao khong truyen.
 
-3. Mo rong output feedback:
-- Them observer neural va bai toan chung minh ket hop controller-observer theo huong cua paper trong docs.
+Sua:
+- Dong bo khoi tao voi nx=2 o test/evaluate/export.
+
+### Loi 2: API RK4 khong dong nhat
+Trieu chung:
+- Goi dynamics.rk4_step(...) fail o mot so entry point.
+
+Nguyen nhan:
+- BaseDynamics co step(...) nhung verifier/export goi rk4_step(...).
+
+Sua:
+- Them alias rk4_step(...) trong BaseDynamics, goi ve step(...).
+
+### Loi 3: auto_LiRPA khong ho tro onnx::Einsum
+Trieu chung:
+- Tracing fail voi unsupported operation Einsum.
+
+Nguyen nhan:
+- torch.einsum trong tinh toan $x^TPx$ bi export thanh onnx::Einsum.
+
+Sua:
+- Doi sang dang matmul + sum tuong duong.
+
+### Loi 4: warning BoundSub "constant operand has batch dimension"
+Trieu chung:
+- Warning khi lan truyen bound.
+
+Nguyen nhan:
+- phi(0) duoc giu dang tensor co batch [1,n].
+
+Sua:
+- Chuyen origin ve [n], khi can moi unsqueeze/squeeze dung diem.
+
+### Loi 5: checkpoint cu khong nap duoc sau khi doi shape origin
+Trieu chung:
+- size mismatch origin [1,n] vs [n].
+
+Nguyen nhan:
+- Thay doi architecture/buffer shape nhung van dung checkpoint cu.
+
+Sua:
+- Them backward compatibility trong load_state_dict: neu origin [1,n] thi squeeze.
+
+### Loi 6: UB luon duong du da giam eps
+Trieu chung:
+- Sweep eps khong tim duoc UB < 0.
+
+Chan doan da thuc hien:
+- Kiem tra u(0), violation(0).
+- Quet nhay rho.
+- Sampling nhieu diem trong hop de tach "vi pham that" va "bound bao thu".
+
+Ket luan:
+- Co vung vi pham that trong hop (sample max violation > 0), khong chi do bound.
+
+Xu ly:
+- Tang luc CEGIS: attacker manh hon, margin, local-box loss, equilibrium loss, replay ratio.
+- Can retrain theo objective moi, checkpoint cu khong du dieu kien de chung minh.
 
 ---
 
-## 8) Nhat ky cap nhat
+## 8) Bat bien can giu de tranh vo pipeline
 
-- Ban hien tai: da co 2-phase training (LQR pre-training + CEGIS) va Counterexample Bank tich hop.
-- Muc tieu tiep theo: chot quy trinh verification end-to-end de co bao dam hinh thuc cho ROA.
+1. Dong nhat he roi rac:
+- Train, eval, verify phai dung cung map RK4 va cung dt.
+
+2. Dong nhat hyperparam canh tranh:
+- alpha_lyap (train) va rho (verify) can nhat quan theo muc tieu so sanh.
+
+3. Dong nhat entry points:
+- train.py, evaluate.py, test_verifier.py, core/export.py phai trung constructor nx/nu/hidden/u_bound.
+
+4. Tuong thich checkpoint:
+- Moi thay doi shape buffer/param can co lop backward compatibility hoac retrain.
+
+5. Neu doi dang V(x):
+- Bat buoc kiem lai V(0), u(0), violation(0) truoc khi tin ket qua sweep.
+
+---
+
+## 9) Quy trinh debug khuyen nghi (thuc chien)
+
+1. Kiem tra sanity tai goc:
+- V(0) phai = 0.
+- u(0) phai = 0.
+- violation(0) nen <= 0.
+
+2. Chay verify 1 eps nho (vi du 1e-3 den 1e-2).
+
+3. Quet eps de xac dinh xu huong UB.
+
+4. Neu UB duong:
+- Sampling trong hop de kiem tra co vi pham that hay khong.
+- Neu co: quay lai train (tang luc attacker/loss).
+- Neu khong: chia nho hop hoac tang do chat verifier.
+
+---
+
+## 10) Trang thai hien tai va huong tiep theo
+
+Trang thai hien tai:
+- Pipeline RK4 train/verify da thong.
+- Da sua cac loi runtime/chinh sach quan trong trong graph va checkpoint.
+- Da co bo cong cu quet eps de danh gia kha nang chung minh.
+
+Huong tiep theo de dat UB am:
+- Retrain dai hon voi objective moi.
+- Verify theo lo trinh eps tu nho den lon.
+- Neu can, chia mien thanh nhieu hop de giam bao thu CROWN.
