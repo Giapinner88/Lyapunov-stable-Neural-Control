@@ -32,7 +32,7 @@ def test_graph_tracing():
 
     # 4. Tạo một không gian nhiễu (Ví dụ: hộp bán kính 0.1 quanh gốc tọa độ)
     print("[2/2] Đang lan truyền ranh giới (Bound Propagation)...")
-    ptb = PerturbationLpNorm(norm=torch.inf, eps=0.1)
+    ptb = PerturbationLpNorm(norm=torch.inf, eps=0.001)
     bounded_x = BoundedTensor(dummy_x, ptb)
     
     # 5. Khởi chạy CROWN

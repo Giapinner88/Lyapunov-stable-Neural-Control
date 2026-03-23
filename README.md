@@ -21,36 +21,6 @@ conda create -n lyapunov_env python=3.10 -y
 conda activate lyapunov_env
 ```
 
-Việc bạn quyết định đập đi xây lại (refactor) từ đầu là một bước đi hợp lý và mang tính kỹ thuật cao. Khi muốn mở rộng từ một hệ 2 chiều (Pendulum) sang một hệ thiếu dẫn động 4 chiều phức tạp hơn (Cart-pole), nếu bộ khung hướng đối tượng (OOP) ban đầu không đủ tính khái quát, code sẽ rất nhanh chóng trở thành một mớ chắp vá. Việc đập đi xây lại giúp bạn có cơ hội quy hoạch lại lớp `BaseDynamics` sao cho vòng lặp CEGIS có thể tái sử dụng hoàn toàn mà không cần quan tâm hệ bên dưới là gì.
-
-Dưới đây là bản nháp `README.md` và `requirements.txt` được thiết kế lại từ những nguyên lý cơ bản nhất. 
-
-### 1. File `README.md`
-
-```markdown
-# Lyapunov-stable Neural Control: Pendulum & Cart-Pole
-
-## 🎯 Mục tiêu Dự án
-Dự án này tái hiện và mở rộng kiến trúc từ bài báo **"Lyapunov-stable Neural Control" (Yang et al., 2024)**. 
-
-Thay vì chỉ kiểm chứng trên hệ con lắc ngược (Inverted Pendulum), dự án được cấu trúc lại bằng một bộ khung Hướng đối tượng (OOP) tổng quát cho vòng lặp CEGIS (Counter-Example Guided Inductive Synthesis). Mục đích là để có thể dễ dàng mở rộng (scale-up) thuật toán sang các hệ thống động lực học thiếu dẫn động (underactuated) bậc cao hơn, tiêu biểu là hệ **Cart-Pole** (4D).
-
-**Các mục tiêu cốt lõi:**
-1. **Generic CEGIS Pipeline:** Tách biệt hoàn toàn phần thuật toán huấn luyện (Neural Controller & Neural Lyapunov) khỏi phần động lực học vật lý (Dynamics).
-2. **Toán học hóa Hàm Lyapunov:** Đảm bảo kiến trúc mạng tuân thủ chặt chẽ công thức toán học nguyên thủy $V(x) = |\phi_V(x) - \phi_V(0)| + \|(\epsilon I + R^TR)x\|_1$ để đảm bảo $V(0) = 0$ tuyệt đối.
-3. **Formal Verification:** Tích hợp bộ giải $\alpha,\beta$-CROWN để chứng minh ranh giới an toàn (Region of Attraction - ROA) bằng toán học nghiêm ngặt, khắc phục các điểm mù (counter-examples) mà phương pháp lấy mẫu (PGD) bỏ sót.
-
-## ⚙️ Hướng dẫn Cài đặt (Conda Environment)
-
-Để kiểm soát chặt chẽ các phụ thuộc tuyến tính của công cụ xác minh hình thức (đặc biệt là `auto_LiRPA` và bộ giải CROWN), dự án này bắt buộc phải chạy trong môi trường ảo được cô lập.
-
-**Bước 1: Khởi tạo môi trường ảo với Conda**
-Bản chất của Conda không chỉ quản lý các gói Python mà còn quản lý các thư viện C/C++ ngầm định (ví dụ như các driver CUDA hay thư viện toán học cấp thấp) giúp PyTorch tính toán đồ thị tính (computation graph) ổn định hơn.
-```bash
-conda create -n lyapunov_env python=3.10 -y
-conda activate lyapunov_env
-```
-
 **Bước 2: Cài đặt các thư viện lõi**
 Cài đặt trực tiếp từ file requirements:
 ```bash
