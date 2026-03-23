@@ -130,11 +130,17 @@ class PGDAttacker:
             loss_attack.backward()
 
             with torch.no_grad():
-                x_adv = x + self.step_size * x.grad.sign()
+                # TÍNH TOÁN BƯỚC CHÂN TỈ LỆ VỚI KHÔNG GIAN
+                span = x_max - x_min
+                # step_size (vd: 0.01) giờ là 1% của toàn bộ dải vật lý
+                scaled_step = span * self.step_size 
+                
+                x_adv = x + scaled_step * x.grad.sign()
+                
                 if self.noise_scale > 0.0:
-                    # Nhiễu giảm dần theo bước để thoát plateau nhưng vẫn hội tụ cuối vòng.
                     anneal = 1.0 - (step_idx / max(1, self.num_steps - 1))
-                    x_adv = x_adv + self.noise_scale * anneal * torch.randn_like(x_adv)
+                    x_adv = x_adv + self.noise_scale * anneal * span * torch.randn_like(x_adv)
+                
                 x_adv = torch.clamp(x_adv, min=x_min, max=x_max)
 
             x = x_adv.clone().detach().requires_grad_(True)
@@ -232,6 +238,8 @@ class CEGISLoop:
         self,
         x_seed: torch.Tensor,
         x_bounds: tuple,
+        K: torch.Tensor,  # <--- Thêm K
+        S: torch.Tensor,  # <--- Thêm S
         alpha_lyap: float = 0.01,
         train_batch_size: int | None = None,
     ):
@@ -246,34 +254,58 @@ class CEGISLoop:
             train_batch_size = x_seed.shape[0]
 
         x_train = self._build_training_batch(x_bad, train_batch_size)
-        loss = self.learner_step(x_train, alpha_lyap=alpha_lyap)
+        
+        # DEBUG: Kiểm tra mức độ violation từ attacker
+        with torch.no_grad():
+            u_debug = self.controller(x_bad)
+            x_next_debug = self.dynamics.step(x_bad, u_debug)
+            V_curr_debug = self.lyapunov(x_bad)
+            V_next_debug = self.lyapunov(x_next_debug)
+            violation_debug = V_next_debug - (1.0 - alpha_lyap) * V_curr_debug
+            max_violation = torch.max(violation_debug).item()
+            mean_violation = torch.mean(violation_debug).item()
+        
+        loss = self.learner_step(x_train, alpha_lyap=alpha_lyap, K=K, S=S)  # <--- Truyền K, S vào đây
 
         return {
             "loss": loss,
             "bank_size": self.counterexample_bank.size,
             "num_new_bad": int(x_bad.shape[0]),
             "train_batch_size": int(x_train.shape[0]),
+            "max_violation": max_violation,
+            "mean_violation": mean_violation,
         }
 
-    def learner_step(self, x_samples: torch.Tensor, alpha_lyap: float = 0.01):
-        """
-        Một bước huấn luyện (Cập nhật trọng số mạng Neural)
-        """
+    def learner_step(self, x_samples: torch.Tensor, alpha_lyap: float, K: torch.Tensor, S: torch.Tensor):
         self.optimizer.zero_grad()
         
+        # --- 1. LOSS VI PHẠM TỪ PGD (Mở rộng ranh giới) ---
         u = self.controller(x_samples)
         x_next = self.dynamics.step(x_samples, u)
-        
         V_curr = self.lyapunov(x_samples)
         V_next = self.lyapunov(x_next)
+        lyap_decrease_loss = torch.mean(torch.relu(V_next - (1.0 - alpha_lyap) * V_curr))
         
-        # Hàm suy hao Lyapunov: V_next - V_curr <= -alpha * V_curr
-        # => V_next - (1 - alpha) * V_curr <= 0
-        # ReLU sẽ chỉ phạt những điểm lớn hơn 0 (tức là những điểm vi phạm)
-        lyap_decrease_loss = torch.mean(torch.relu(V_next - (1 - alpha_lyap) * V_curr))
+        # --- 2. LOSS MỎ NEO LQR (Giữ hình dáng vật lý tại trung tâm) ---
+        device = x_samples.device
+        # Sinh một batch nhỏ quanh gốc tọa độ (bán kính 0.1)
+        x_small = (torch.rand((128, self.dynamics.nx), device=device) * 2.0 - 1.0) * 0.1
         
-        loss = lyap_decrease_loss
+        u_nn = self.controller(x_small)
+        u_lqr = -torch.matmul(x_small, K.T)
+        u_lqr = torch.clamp(u_lqr, min=-self.controller.u_bound, max=self.controller.u_bound)
+        loss_u = torch.nn.functional.mse_loss(u_nn, u_lqr)
+        
+        V_nn = self.lyapunov(x_small)
+        V_lqr = torch.einsum("bi,ij,bj->b", x_small, S, x_small).unsqueeze(1)
+        loss_v = torch.nn.functional.mse_loss(V_nn, V_lqr)
+        
+        # Gộp loss: Diệt điểm mù (trọng số 1.0) + Giữ mỏ neo (trọng số 0.01 - GẢM từ 0.1)
+        # Giảm anchor weight để learner không bị distract, tập trung vào violation
+        loss = lyap_decrease_loss + 0.01 * (loss_u + loss_v)
+        
         loss.backward()
         self.optimizer.step()
         
+        # FIX: Trả về loss THỰC TẾ được backprop, không phải từng bộ phận mà bị ignore
         return loss.item()

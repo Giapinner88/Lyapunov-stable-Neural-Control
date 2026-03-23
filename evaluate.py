@@ -9,7 +9,7 @@ def plot_phase_portrait():
     device = torch.device("cpu") # Vẽ đồ thị thì dùng CPU cho tiện xử lý mảng NumPy
     dynamics = PendulumDynamics().to(device)
     
-    controller = NeuralController(nx=2, nu=1, u_bound=2.0).to(device)
+    controller = NeuralController(nx=2, nu=1, u_bound=6.0).to(device)
     lyapunov = NeuralLyapunov(nx=2).to(device)
     
     try:

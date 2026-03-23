@@ -22,9 +22,10 @@ def train():
     S = S.to(device)
 
     # 2. Khởi tạo models
-    controller = NeuralController(nx=2, nu=1, u_bound=2.0).to(device)
+    controller = NeuralController(nx=2, nu=1, u_bound=6.0).to(device)
     lyapunov = NeuralLyapunov(nx=2).to(device)
-    attacker = PGDAttacker(dynamics, controller, lyapunov, num_steps=10, num_restarts=3)
+    # TỐI ƯU HÓA PHASE 2: Giảm steps (100→50) vì backward quá chậm
+    attacker = PGDAttacker(dynamics, controller, lyapunov, num_steps=50, step_size=0.04, num_restarts=3)
     optimizer = optim.Adam(list(controller.parameters()) + list(lyapunov.parameters()), lr=1e-3)
 
     # 3. Khởi tạo CEGIS loop có CounterexampleBank nội bộ
@@ -39,10 +40,10 @@ def train():
         replay_new_ratio=0.25,
     )
 
-    batch_size = 1000
-    attack_seed_size = 500
+    batch_size = 512  # Giảm từ 1000 → 512
+    attack_seed_size = 256  # Giảm từ 500 → 256
     train_batch_size = batch_size
-    learner_updates = 5
+    learner_updates = 2  # Giảm từ 5 → 2
 
     # =========================================================
     # PHASE 1: LQR PRE-TRAINING
@@ -74,28 +75,40 @@ def train():
     # PHASE 2: CEGIS LOOP
     # =========================================================
     print("\n--- BẮT ĐẦU PHASE 2: CEGIS LOOP ---")
-    epochs = 500
+    epochs = 300  # Giảm từ 500 → 300 epochs
     alpha_lyap = 0.05
     for epoch in range(epochs):
         total_loss = 0
         bank_size = 0
 
+        # TÍNH TOÁN RANH GIỚI TÌM KIẾM ĐỘNG (CURRICULUM LEARNING)
+        # Đi từ 50% không gian ở Epoch 0 lên 100% không gian ở Epoch cuối (từ 10% → 50%)
+        progress = epoch / max(1, epochs - 1)
+        current_scale = 0.5 + 0.5 * progress
+        current_x_min = x_min * current_scale
+        current_x_max = x_max * current_scale
+        current_bounds = (current_x_min, current_x_max)
+
         for _ in range(learner_updates):
-            # Seed rải đều toàn miền để attacker khám phá phản ví dụ mới liên tục.
-            x_seeds = x_min + torch.rand((attack_seed_size, 2), device=device) * (x_max - x_min)
+            # Seed rải đều trong vùng giới hạn hiện tại, KHÔNG rải toàn miền
+            x_seeds = current_x_min + torch.rand((attack_seed_size, 2), device=device) * (current_x_max - current_x_min)
+            
             info = cegis.cegis_step(
                 x_seed=x_seeds,
-                x_bounds=x_bounds,
+                x_bounds=current_bounds, # <-- Truyền ranh giới đã thu nhỏ
+                K=K,
+                S=S,
                 alpha_lyap=alpha_lyap,
                 train_batch_size=train_batch_size,
             )
             total_loss += info["loss"]
             bank_size = info["bank_size"]
 
-        if epoch % 20 == 0:
+        if epoch % 30 == 0:  # Tăng checkpoint từ 20 → 30
             print(
-                f"CEGIS Epoch {epoch:03d} | Counterexample Bank: {bank_size} | "
-                f"Violation Loss: {total_loss / learner_updates:.6f}"
+                f"CEGIS Epoch {epoch:03d} | Quy mô Box: {current_scale*100:.1f}% | "
+                f"Bank: {bank_size} | Loss: {total_loss / learner_updates:.6f} | "
+                f"Max Violt: {info['max_violation']:.6f} | Mean Violt: {info['mean_violation']:.6f}"
             )
 
     # 4. Lưu trọng số
