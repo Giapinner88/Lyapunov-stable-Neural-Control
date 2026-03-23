@@ -80,3 +80,13 @@ class NeuralLyapunov(nn.Module):
         V = term1 + term2
         V = torch.relu(V) + 0.01
         return V
+
+    def load_state_dict(self, state_dict, strict: bool = True):
+        # Backward compatibility: old checkpoints stored origin as shape [1, nx].
+        origin_key = "origin"
+        if origin_key in state_dict:
+            origin_tensor = state_dict[origin_key]
+            if origin_tensor.ndim == 2 and origin_tensor.shape[0] == 1:
+                state_dict = state_dict.copy()
+                state_dict[origin_key] = origin_tensor.squeeze(0)
+        return super().load_state_dict(state_dict, strict=strict)

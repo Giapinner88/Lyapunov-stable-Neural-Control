@@ -29,16 +29,23 @@ class CompleteVerifierGraph(nn.Module):
         # Gom lại thành vector đầu ra [batch_size, 2]
         return torch.cat([y_0, v_t], dim=1)
 
-def export_to_onnx(model_path="models/phase2_cegis_best.pth", output_onnx="models/pendulum_system.onnx"):
+def export_to_onnx(
+    controller_path="pendulum_controller.pth",
+    lyapunov_path="pendulum_lyapunov.pth",
+    output_onnx="models/pendulum_system.onnx",
+):
     device = torch.device("cpu") # ONNX export nên chạy trên CPU
     
-    net_c = NeuralController()
-    net_v = NeuralLyapunov()
-    
-    # [Tự chèn code load state_dict của bạn tại đây]
-    # checkpoint = torch.load(model_path)
-    # net_c.load_state_dict(checkpoint['controller'])
-    # net_v.load_state_dict(checkpoint['lyapunov'])
+    net_c = NeuralController(nx=2, nu=1, u_bound=6.0)
+    net_v = NeuralLyapunov(nx=2)
+
+    try:
+        net_c.load_state_dict(torch.load(controller_path, map_location=device))
+        net_v.load_state_dict(torch.load(lyapunov_path, map_location=device))
+        print("Đã nạp thành công trọng số controller/lyapunov.")
+    except FileNotFoundError as e:
+        print(f"Không tìm thấy checkpoint: {e}")
+        return
     
     dynamics = PendulumDynamics()
     graph = CompleteVerifierGraph(net_c, net_v, dynamics)
