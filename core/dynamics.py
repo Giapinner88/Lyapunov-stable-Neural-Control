@@ -29,6 +29,9 @@ class BaseDynamics(nn.Module):
 
     def step(self, x: torch.Tensor, u: torch.Tensor) -> torch.Tensor:
         return rk4_step(self.continuous_dynamics, x, u, self.dt)
+
+    def rk4_step(self, x: torch.Tensor, u: torch.Tensor) -> torch.Tensor:
+        return self.step(x, u)
         
     def get_lqr_baseline(self):
         raise NotImplementedError()

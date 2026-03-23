@@ -55,23 +55,24 @@ class NeuralLyapunov(nn.Module):
         self.eps = eps
         
         self.register_buffer("eye", torch.eye(nx))
-        self.register_buffer("origin", torch.zeros(1, nx))
+        self.register_buffer("origin", torch.zeros(nx))
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         # 1. Tính phi_0
-        zero_norm = self.origin / self.state_limits
+        zero_norm = self.origin.unsqueeze(0) / self.state_limits
         with torch.no_grad():
-            phi_0 = self.phi_V(zero_norm)
+            phi_0 = self.phi_V(zero_norm).squeeze(0)
 
         # 2. Tính ||phi_V(x) - phi_V(0)||_1 trên x đã chuẩn hóa
         x_norm = x / self.state_limits
-        phi_x = self.phi_V(x_norm)          
+        phi_x = self.phi_V(x_norm)
         term1 = torch.sum(torch.abs(phi_x - phi_0), dim=1, keepdim=True)
         
         # 3. Tính x^T * P * x 
         # (LƯU Ý: Tuyệt đối dùng x GỐC ở đây để bảo toàn kích thước vật lý của mỏ neo LQR)
         P = self.eps * self.eye + torch.matmul(self.R.T, self.R)
-        term2 = torch.einsum('bi,ij,bj->b', x, P, x).unsqueeze(1)
+        Px = torch.matmul(x, P)
+        term2 = torch.sum(Px * x, dim=1, keepdim=True)
         
         # 4. BỨC TỎNG GIỚI HẠN V CÓ KÍCH THƯỚC HỢP LÝ:
         # Thêm max thấp nhất là 0.01 để đảm bảo V > 0 luôn
