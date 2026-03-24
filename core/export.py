@@ -1,5 +1,12 @@
 import torch
 import torch.nn as nn
+from pathlib import Path
+import sys
+
+if __package__ is None or __package__ == "":
+    # Allow running this file directly: python core/export.py
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
 from core.models import NeuralController, NeuralLyapunov
 from core.dynamics import PendulumDynamics
 

@@ -1,4 +1,10 @@
 import torch
+from pathlib import Path
+import sys
+
+if __package__ is None or __package__ == "":
+	sys.path.insert(0, str(Path(__file__).resolve().parent))
+
 from core.dynamics import PendulumDynamics
 
 # 1. Khởi tạo hệ thống con lắc

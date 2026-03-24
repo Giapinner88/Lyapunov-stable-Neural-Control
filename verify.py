@@ -9,11 +9,15 @@ import torch
 import torch.nn as nn
 import argparse
 from pathlib import Path
+import sys
 from typing import Dict
+
+if __package__ is None or __package__ == "":
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from core.dynamics import CartpoleDynamics, PendulumDynamics
 from core.models import NeuralController, NeuralLyapunov
-from core.verification import BisectionVerifier, create_cartpole_verification_result
+from core.verification import BisectionVerifier, CrownRadiusVerifier, create_cartpole_verification_result
 from core.roa_utils import compute_rho_boundary, estimate_roa_size
 from core.training_config import get_default_config
 
@@ -66,6 +70,9 @@ def verify_cartpole_roa(
     lyapunov_path: str,
     output_dir: str = "./verification_results",
     alpha_lyap: float = 0.05,
+    run_crown: bool = True,
+    crown_eps_max: float = 1.0,
+    crown_method: str = "CROWN",
     verbose: bool = True,
 ) -> Dict:
     """
@@ -153,6 +160,33 @@ def verify_cartpole_roa(
     result["rho_empirical"] = rho_empirical
     result["roa_volume"] = roa_volume
     result["roa_ratio"] = roa_ratio
+
+    # Step 4: Formal local certificate with CROWN (optional)
+    if run_crown:
+        if verbose:
+            print("\n[Step 4] Running CROWN local-radius verification...")
+        try:
+            crown_verifier = CrownRadiusVerifier(
+                controller,
+                lyapunov,
+                dynamics,
+                alpha_lyap=alpha_lyap,
+                device=device,
+            )
+            certified_eps, crown_info = crown_verifier.bisection_search(
+                eps_min=1e-4,
+                eps_max=crown_eps_max,
+                max_iterations=12,
+                method=crown_method,
+                verbose=verbose,
+            )
+            result["crown_local_certified_eps"] = float(certified_eps)
+            result["crown_method"] = crown_method
+            result["crown_history"] = crown_info.get("history", [])
+        except RuntimeError as exc:
+            result["crown_error"] = str(exc)
+            if verbose:
+                print(f"[Step 4] Skip CROWN: {exc}")
     
     if verbose:
         print(f"\n[Results Summary]")
@@ -160,6 +194,10 @@ def verify_cartpole_roa(
         print(f"  Verified ρ:  {rho_certified:.6f}")
         print(f"  ROA Ratio in Box: {roa_ratio:.2%}")
         print(f"  Estimated ROA Volume: {roa_volume:.4f}")
+        if "crown_local_certified_eps" in result:
+            print(f"  CROWN Certified Local Radius (L_inf): {result['crown_local_certified_eps']:.6f}")
+        elif "crown_error" in result:
+            print(f"  CROWN status: {result['crown_error']}")
     
     # Save results
     Path(output_dir).mkdir(exist_ok=True, parents=True)
@@ -175,6 +213,13 @@ def verify_cartpole_roa(
         f.write(f"ROA Ratio in Box: {roa_ratio:.2%}\n")
         f.write(f"Estimated ROA Volume: {roa_volume:.4f}\n")
         f.write(f"Box Limits: x ∈ [{x_min.tolist()}, {x_max.tolist()}]\n")
+        if "crown_local_certified_eps" in result:
+            f.write(
+                f"CROWN Local Certified Radius (L_inf): {result['crown_local_certified_eps']:.6f}"
+                f" (method={result.get('crown_method', 'CROWN')})\n"
+            )
+        elif "crown_error" in result:
+            f.write(f"CROWN status: {result['crown_error']}\n")
     
     if verbose:
         print(f"\n[Output] Summary saved to: {summary_path}")
@@ -210,6 +255,24 @@ if __name__ == "__main__":
         default=0.05,
         help="Lyapunov decrease rate",
     )
+    parser.add_argument(
+        "--skip-crown",
+        action="store_true",
+        help="Skip CROWN local-radius verification",
+    )
+    parser.add_argument(
+        "--crown-eps-max",
+        type=float,
+        default=1.0,
+        help="Upper radius bound for CROWN bisection",
+    )
+    parser.add_argument(
+        "--crown-method",
+        type=str,
+        default="CROWN",
+        choices=["CROWN", "alpha-CROWN"],
+        help="Bound propagation method for CROWN local verification",
+    )
     
     args = parser.parse_args()
     
@@ -218,6 +281,9 @@ if __name__ == "__main__":
         args.lyapunov,
         output_dir=args.output_dir,
         alpha_lyap=args.alpha_lyap,
+        run_crown=not args.skip_crown,
+        crown_eps_max=args.crown_eps_max,
+        crown_method=args.crown_method,
         verbose=True,
     )
     

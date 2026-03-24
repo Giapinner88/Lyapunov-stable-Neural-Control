@@ -7,7 +7,11 @@ import torch.nn as nn
 import numpy as np
 import argparse
 from pathlib import Path
+import sys
 from typing import Tuple, List
+
+if __package__ is None or __package__ == "":
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from core.dynamics import CartpoleDynamics
 from core.models import NeuralController, NeuralLyapunov

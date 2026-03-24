@@ -1,6 +1,12 @@
 import torch
 import numpy as np
 import matplotlib.pyplot as plt
+from pathlib import Path
+import sys
+
+if __package__ is None or __package__ == "":
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+
 from core.dynamics import PendulumDynamics
 from core.models import NeuralController, NeuralLyapunov
 

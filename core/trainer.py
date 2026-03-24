@@ -1,6 +1,12 @@
 import torch
 import torch.nn.functional as F
 import torch.optim as optim
+from pathlib import Path
+import sys
+
+if __package__ is None or __package__ == "":
+    # Allow running this file directly: python core/trainer.py
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from core.cegis import CEGISLoop, PGDAttacker
 from core.dynamics import CartpoleDynamics, PendulumDynamics
@@ -278,6 +284,8 @@ class LyapunovTrainer:
             self._sweep_local_region(epoch, current_bounds)
 
     def _save(self) -> None:
+        Path(self.config.output.controller_path).parent.mkdir(parents=True, exist_ok=True)
+        Path(self.config.output.lyapunov_path).parent.mkdir(parents=True, exist_ok=True)
         torch.save(self.controller.state_dict(), self.config.output.controller_path)
         torch.save(self.lyapunov.state_dict(), self.config.output.lyapunov_path)
         print("Đã lưu mô hình thành công!")

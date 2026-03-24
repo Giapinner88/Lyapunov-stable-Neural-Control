@@ -1,5 +1,11 @@
 import torch
 import argparse
+from pathlib import Path
+import sys
+
+if __package__ is None or __package__ == "":
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+
 from auto_LiRPA import BoundedModule, BoundedTensor, PerturbationLpNorm
 # Import các module cốt lõi của bạn (giả sử tên hàm và class như sau)
 from core.models import NeuralController, NeuralLyapunov

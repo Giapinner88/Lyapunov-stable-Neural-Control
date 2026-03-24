@@ -10,6 +10,12 @@ Kiểm tra 3 câu hỏi:
 
 import torch
 import numpy as np
+from pathlib import Path
+import sys
+
+if __package__ is None or __package__ == "":
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+
 from core.models import NeuralController, NeuralLyapunov
 from core.dynamics import PendulumDynamics
 

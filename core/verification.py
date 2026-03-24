@@ -10,6 +10,13 @@ import torch.nn as nn
 from typing import Tuple, Optional, Dict, List
 import numpy as np
 
+try:
+    from auto_LiRPA import BoundedModule, BoundedTensor, PerturbationLpNorm
+except ImportError:
+    BoundedModule = None
+    BoundedTensor = None
+    PerturbationLpNorm = None
+
 
 class CartpoleVerificationGraph(nn.Module):
     """
@@ -61,6 +68,35 @@ class CartpoleVerificationGraph(nn.Module):
         y2 = torch.zeros_like(y1)
         
         return y0, y1, y2
+
+
+class CartpoleDecreaseGraph(nn.Module):
+    """
+    Single-output graph for formal local verification with CROWN.
+
+    Output is F(x) = V(x_next) - (1 - alpha) * V(x).
+    If upper bound of F(x) is <= 0 on a region, Lyapunov decrease is certified there.
+    """
+
+    def __init__(
+        self,
+        controller: nn.Module,
+        lyapunov: nn.Module,
+        dynamics: nn.Module,
+        alpha_lyap: float = 0.05,
+    ):
+        super().__init__()
+        self.controller = controller
+        self.lyapunov = lyapunov
+        self.dynamics = dynamics
+        self.alpha_lyap = alpha_lyap
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        u = self.controller(x)
+        x_next = self.dynamics.step(x, u)
+        v_curr = self.lyapunov(x)
+        v_next = self.lyapunov(x_next)
+        return v_next - (1.0 - self.alpha_lyap) * v_curr
 
 
 class VerificationCondition:
@@ -237,6 +273,106 @@ class BisectionVerifier:
                 break
         
         return rho_lo, {"history": history, "final_rho": rho_lo}
+
+
+class CrownRadiusVerifier:
+    """
+    Formal local verifier using CROWN on L_inf balls centered at equilibrium.
+
+    Finds max epsilon such that for all ||x||_inf <= epsilon:
+        V(x_next) - (1 - alpha) * V(x) <= 0
+    """
+
+    def __init__(
+        self,
+        controller: nn.Module,
+        lyapunov: nn.Module,
+        dynamics: nn.Module,
+        alpha_lyap: float = 0.05,
+        device: torch.device = torch.device("cpu"),
+    ):
+        if BoundedModule is None:
+            raise RuntimeError(
+                "auto_LiRPA is not available. Install it to use CrownRadiusVerifier."
+            )
+
+        self.device = device
+        self.graph = CartpoleDecreaseGraph(
+            controller=controller,
+            lyapunov=lyapunov,
+            dynamics=dynamics,
+            alpha_lyap=alpha_lyap,
+        ).to(device)
+        self.graph.eval()
+
+        self.x0 = torch.zeros((1, dynamics.nx), dtype=torch.float32, device=device)
+        self.bounded_model = BoundedModule(self.graph, self.x0, bound_opts={"relu": "adaptive"})
+
+    def bound_at_eps(self, eps: float, method: str = "CROWN") -> Dict[str, float]:
+        if eps < 0.0:
+            raise ValueError("eps must be non-negative")
+
+        ptb = PerturbationLpNorm(norm=torch.inf, eps=float(eps))
+        bx = BoundedTensor(self.x0, ptb)
+
+        with torch.no_grad():
+            lb, ub = self.bounded_model.compute_bounds(x=(bx,), method=method)
+
+        return {
+            "eps": float(eps),
+            "lb": float(lb.item()),
+            "ub": float(ub.item()),
+            "certified": bool(ub.item() <= 0.0),
+        }
+
+    def bisection_search(
+        self,
+        eps_min: float = 1e-4,
+        eps_max: float = 1.0,
+        max_iterations: int = 12,
+        method: str = "CROWN",
+        verbose: bool = True,
+    ) -> Tuple[float, Dict]:
+        lo = float(eps_min)
+        hi = float(eps_max)
+        history = []
+
+        if verbose:
+            print(f"\n[CROWN] Search certified radius in [{lo:.6f}, {hi:.6f}]")
+
+        lo_stats = self.bound_at_eps(lo, method=method)
+        hi_stats = self.bound_at_eps(hi, method=method)
+        history.append({"iteration": -1, "stats": lo_stats})
+        history.append({"iteration": -2, "stats": hi_stats})
+
+        if not lo_stats["certified"]:
+            if verbose:
+                print("  Lower endpoint is not certified; returning 0.0")
+            return 0.0, {"history": history, "final_eps": 0.0}
+
+        if hi_stats["certified"]:
+            if verbose:
+                print(f"  Upper endpoint certified directly: eps={hi:.6f}")
+            return hi, {"history": history, "final_eps": hi}
+
+        for i in range(max_iterations):
+            mid = 0.5 * (lo + hi)
+            stats = self.bound_at_eps(mid, method=method)
+            history.append({"iteration": i, "stats": stats})
+
+            if verbose:
+                mark = "✓" if stats["certified"] else "✗"
+                print(f"  Iter {i:02d}: eps={mid:.6f}, UB={stats['ub']:.6f} {mark}")
+
+            if stats["certified"]:
+                lo = mid
+            else:
+                hi = mid
+
+            if (hi - lo) < 1e-5:
+                break
+
+        return lo, {"history": history, "final_eps": lo}
 
 
 def create_cartpole_verification_result(
