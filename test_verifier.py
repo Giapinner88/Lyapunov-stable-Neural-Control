@@ -22,7 +22,7 @@ def build_bounded_model(device='cpu'):
     dynamics = PendulumDynamics().to(device)
 
     # 2. Khởi tạo đồ thị vi phạm
-    model = SystemViolationGraph(net_c, net_v, dynamics).to(device)
+    model = SystemViolationGraph(net_c, net_v, dynamics, rho=0.0).to(device)
     model.eval()
 
     # 3. Tạo dummy input để auto_LiRPA tracing đồ thị
