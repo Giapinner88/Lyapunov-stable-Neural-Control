@@ -30,8 +30,8 @@ class CompleteVerifierGraph(nn.Module):
         return torch.cat([y_0, v_t], dim=1)
 
 def export_to_onnx(
-    controller_path="pendulum_controller.pth",
-    lyapunov_path="pendulum_lyapunov.pth",
+    controller_path="checkpoints/pendulum/pendulum_controller.pth",
+    lyapunov_path="checkpoints/pendulum/pendulum_lyapunov.pth",
     output_onnx="models/pendulum_system.onnx",
 ):
     device = torch.device("cpu") # ONNX export nên chạy trên CPU

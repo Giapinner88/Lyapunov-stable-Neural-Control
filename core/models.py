@@ -5,13 +5,24 @@ import torch.nn as nn
 # 1. NEURAL CONTROLLER
 # ==========================================
 class NeuralController(nn.Module):
-    def __init__(self, nx: int, nu: int, hidden_sizes: list = [64, 64], u_bound: float = 6.0):
+    def __init__(
+        self,
+        nx: int,
+        nu: int,
+        hidden_sizes: list = [64, 64],
+        u_bound: float = 6.0,
+        state_limits: torch.Tensor | list[float] | tuple[float, ...] | None = None,
+    ):
         super().__init__()
         self.u_bound = u_bound
         self.nx = nx
         
-        # [BẢN VÁ]: Khởi tạo giới hạn vật lý để chuẩn hóa (Góc 3.14, Vận tốc 8.0)
-        self.register_buffer("state_limits", torch.tensor([3.1415, 8.0]))
+        if state_limits is None:
+            state_limits = torch.ones(nx)
+        state_limits_tensor = torch.as_tensor(state_limits, dtype=torch.float32)
+        if state_limits_tensor.numel() != nx:
+            raise ValueError(f"state_limits must have {nx} elements, got {state_limits_tensor.numel()}")
+        self.register_buffer("state_limits", state_limits_tensor.view(nx))
         self.register_buffer("origin", torch.zeros(nx), persistent=False)
         
         layers = []
@@ -42,13 +53,23 @@ class NeuralController(nn.Module):
 # 2. NEURAL LYAPUNOV FUNCTION
 # ==========================================
 class NeuralLyapunov(nn.Module):
-    def __init__(self, nx: int, hidden_sizes: list = [64, 64], eps: float = 0.01):
+    def __init__(
+        self,
+        nx: int,
+        hidden_sizes: list = [64, 64],
+        eps: float = 0.01,
+        state_limits: torch.Tensor | list[float] | tuple[float, ...] | None = None,
+    ):
         super().__init__()
         if eps <= 0.0:
             raise ValueError("eps phải > 0 để đảm bảo V(x) dương xác định nghiêm ngặt")
         
-        # [BẢN VÁ]: Giới hạn chuẩn hóa
-        self.register_buffer("state_limits", torch.tensor([3.1415, 8.0]))
+        if state_limits is None:
+            state_limits = torch.ones(nx)
+        state_limits_tensor = torch.as_tensor(state_limits, dtype=torch.float32)
+        if state_limits_tensor.numel() != nx:
+            raise ValueError(f"state_limits must have {nx} elements, got {state_limits_tensor.numel()}")
+        self.register_buffer("state_limits", state_limits_tensor.view(nx))
         
         layers = []
         in_size = nx

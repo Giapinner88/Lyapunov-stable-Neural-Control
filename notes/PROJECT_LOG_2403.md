@@ -5,12 +5,44 @@
 
 ---
 
+## 🆕 UPDATE MỚI: So sánh Quadratic Lyapunov vs alpha-CROWN
+
+Đã thêm pipeline so sánh trực tiếp theo hướng paper:
+
+- Script mới: `compare_methods.py`
+- Baseline mới: `core/baselines.py`
+  - `LQRController`: u(x) = -Kx (có saturate)
+  - `QuadraticLyapunov`: V(x) = x^T P x
+
+### Kết quả thực nghiệm (eps = 0.1, rho = 0.0)
+
+| Method | Max violation | Mean violation | Violation >= 0 | Converged | Diverged |
+|--------|---------------|----------------|----------------|-----------|----------|
+| Quadratic (LQR + x^T P x) | -0.000000 | -0.001898 | 0.0% | 100.0% | 0.0% |
+| Neural (NN + NN) | 0.000006 | -0.001220 | 0.5% | 100.0% | 0.0% |
+
+### Formal bound (auto_LiRPA)
+
+| Method | CROWN UB | alpha-CROWN UB | Certified radius CROWN | Certified radius alpha-CROWN |
+|--------|----------|----------------|------------------------|------------------------------|
+| Quadratic | 0.164923 | 0.164923 | 0.000000 | 0.000000 |
+| Neural | 0.025799 | 0.025796 | 0.000000 | 0.000000 |
+
+### Kết luận ngắn
+
+1. Về dynamics thực: cả hai đều hội tụ tốt trong vùng kiểm tra.
+2. Về formal bound: alpha-CROWN chỉ cải thiện rất nhỏ so với CROWN trong cấu hình hiện tại.
+3. `complete_verifier` chưa được cài trong env hiện tại, nên chưa chạy full alpha-beta-CROWN (beta split).
+4. Báo cáo chi tiết được lưu tại: `comparison_report.md`.
+
+---
+
 ## 🎯 PROJECT OBJECTIVE
 Xây dựng hệ thống CEGIS (Counterexample-Guided Inductive Synthesis) để tìm controller ổn định Lyapunov cho con lắc ngược với neural network.
 
 ---
 
-## 📋 VẤNĐỀ PHÁ HIỆN & GIẢI PHÁP
+## 📋 VẤN ĐỀ PHÁT HIỆN & GIẢI PHÁP
 
 ### **VẤNĐỀ 1: Upper Bound KHÔNG VỀ ÂM (Ban đầu)**
 - **Triệu chứng:** Upper bound ≈ 0.023 > 0 sau 250 epochs CEGIS

@@ -13,6 +13,9 @@ import numpy as np
 from core.models import NeuralController, NeuralLyapunov
 from core.dynamics import PendulumDynamics
 
+PENDULUM_CONTROLLER_PATH = "checkpoints/pendulum/pendulum_controller.pth"
+PENDULUM_LYAPUNOV_PATH = "checkpoints/pendulum/pendulum_lyapunov.pth"
+
 def test_trajectory_stability(num_trajectories=1000, max_steps=100, device='cpu'):
     """
     Kiểm tra: Khi chạy controller NN, trajectories có hội tụ về 0 không?
@@ -25,8 +28,8 @@ def test_trajectory_stability(num_trajectories=1000, max_steps=100, device='cpu'
     net_v = NeuralLyapunov(nx=2).to(device)
     
     try:
-        net_c.load_state_dict(torch.load("pendulum_controller.pth", map_location=device))
-        net_v.load_state_dict(torch.load("pendulum_lyapunov.pth", map_location=device))
+        net_c.load_state_dict(torch.load(PENDULUM_CONTROLLER_PATH, map_location=device))
+        net_v.load_state_dict(torch.load(PENDULUM_LYAPUNOV_PATH, map_location=device))
         print("✓ Đã load models")
     except Exception as e:
         print(f"✗ Lỗi: {e}")
@@ -101,8 +104,8 @@ def point_wise_vs_crown_analysis(device='cpu'):
     net_v = NeuralLyapunov(nx=2).to(device)
     
     try:
-        net_c.load_state_dict(torch.load("pendulum_controller.pth", map_location=device))
-        net_v.load_state_dict(torch.load("pendulum_lyapunov.pth", map_location=device))
+        net_c.load_state_dict(torch.load(PENDULUM_CONTROLLER_PATH, map_location=device))
+        net_v.load_state_dict(torch.load(PENDULUM_LYAPUNOV_PATH, map_location=device))
     except:
         print("✗ Lỗi load model")
         return

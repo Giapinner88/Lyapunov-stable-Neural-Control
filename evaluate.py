@@ -4,6 +4,10 @@ import matplotlib.pyplot as plt
 from core.dynamics import PendulumDynamics
 from core.models import NeuralController, NeuralLyapunov
 
+PENDULUM_CONTROLLER_PATH = "checkpoints/pendulum/pendulum_controller.pth"
+PENDULUM_LYAPUNOV_PATH = "checkpoints/pendulum/pendulum_lyapunov.pth"
+PHASE_PORTRAIT_PATH = "reports/pendulum_phase_portrait.png"
+
 def plot_phase_portrait():
     # 1. Khởi tạo môi trường và tải trọng số (Load Weights)
     device = torch.device("cpu") # Vẽ đồ thị thì dùng CPU cho tiện xử lý mảng NumPy
@@ -13,8 +17,8 @@ def plot_phase_portrait():
     lyapunov = NeuralLyapunov(nx=2).to(device)
     
     try:
-        controller.load_state_dict(torch.load("pendulum_controller.pth", map_location=device))
-        lyapunov.load_state_dict(torch.load("pendulum_lyapunov.pth", map_location=device))
+        controller.load_state_dict(torch.load(PENDULUM_CONTROLLER_PATH, map_location=device))
+        lyapunov.load_state_dict(torch.load(PENDULUM_LYAPUNOV_PATH, map_location=device))
         print("Đã tải thành công trọng số mô hình!")
     except FileNotFoundError:
         print("Lỗi: Không tìm thấy file trọng số (.pth). Bạn đã chạy train.py xong chưa?")
@@ -76,8 +80,8 @@ def plot_phase_portrait():
     ax.grid(True, linestyle='--', alpha=0.5)
 
     plt.tight_layout()
-    plt.savefig("pendulum_phase_portrait.png", dpi=300)
-    print("Đã lưu ảnh vẽ tại: pendulum_phase_portrait.png")
+    plt.savefig(PHASE_PORTRAIT_PATH, dpi=300)
+    print(f"Đã lưu ảnh vẽ tại: {PHASE_PORTRAIT_PATH}")
     plt.show()
 
 if __name__ == "__main__":

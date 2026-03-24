@@ -6,6 +6,9 @@ from core.models import NeuralController, NeuralLyapunov
 from core.dynamics import PendulumDynamics
 from core.verifier import SystemViolationGraph # Lớp ta vừa thảo luận ở bước trước
 
+PENDULUM_CONTROLLER_PATH = "checkpoints/pendulum/pendulum_controller.pth"
+PENDULUM_LYAPUNOV_PATH = "checkpoints/pendulum/pendulum_lyapunov.pth"
+
 def build_bounded_model(device='cpu'):
     # 1. Khởi tạo các module như Phase 1/2
     net_c = NeuralController(nx=2, nu=1).to(device)
@@ -13,8 +16,8 @@ def build_bounded_model(device='cpu'):
 
     # Nạp tri thức đã học từ quá trình huấn luyện
     try:
-        net_c.load_state_dict(torch.load("pendulum_controller.pth", map_location=device))
-        net_v.load_state_dict(torch.load("pendulum_lyapunov.pth", map_location=device))
+        net_c.load_state_dict(torch.load(PENDULUM_CONTROLLER_PATH, map_location=device))
+        net_v.load_state_dict(torch.load(PENDULUM_LYAPUNOV_PATH, map_location=device))
         print("-> Đã nạp thành công trọng số mô hình.")
     except FileNotFoundError:
         print("-> CẢNH BÁO: Chưa tìm thấy file trọng số. Đang verify mạng ngẫu nhiên!")

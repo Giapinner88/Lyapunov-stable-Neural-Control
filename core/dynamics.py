@@ -96,3 +96,87 @@ class PendulumDynamics(BaseDynamics):
 
         # Trả về dạng PyTorch Tensor
         return torch.tensor(K, dtype=torch.float32), torch.tensor(S, dtype=torch.float32)
+
+
+class CartpoleDynamics(BaseDynamics):
+    """
+    Cartpole dynamics around upright equilibrium.
+    State: [x, x_dot, theta, theta_dot], action: force.
+    """
+
+    def __init__(
+        self,
+        gravity: float = 9.8,
+        masscart: float = 1.0,
+        masspole: float = 0.1,
+        length: float = 1.0,
+        dt: float = 0.05,
+        damping: float = 0.0,
+    ):
+        super().__init__(nx=4, nu=1, dt=dt)
+        self.register_buffer("gravity", torch.tensor(gravity))
+        self.register_buffer("masscart", torch.tensor(masscart))
+        self.register_buffer("masspole", torch.tensor(masspole))
+        self.register_buffer("length", torch.tensor(length))
+        self.register_buffer("damping", torch.tensor(damping))
+
+    def continuous_dynamics(self, x: torch.Tensor, u: torch.Tensor) -> torch.Tensor:
+        cart_pos = x[:, 0:1]
+        cart_vel = x[:, 1:2]
+        theta = x[:, 2:3]
+        theta_dot = x[:, 3:4]
+
+        force = u[:, 0:1]
+        sin_theta = torch.sin(theta)
+        cos_theta = torch.cos(theta)
+
+        total_mass = self.masscart + self.masspole
+        temp = self.masscart + self.masspole * sin_theta * sin_theta
+
+        theta_ddot = (
+            -force * cos_theta
+            - self.masspole * self.length * theta_dot * theta_dot * cos_theta * sin_theta
+            + total_mass * self.gravity * sin_theta
+            - self.damping * theta_dot
+        ) / (self.length * temp)
+
+        x_ddot = (
+            force
+            + self.masspole * sin_theta * (self.length * theta_dot * theta_dot - self.gravity * cos_theta)
+        ) / temp
+
+        return torch.cat([cart_vel, x_ddot, theta_dot, theta_ddot], dim=1)
+
+    def step(self, x: torch.Tensor, u: torch.Tensor) -> torch.Tensor:
+        # Keep Euler update to stay close to the baseline implementation in the paper code.
+        x_dot = self.continuous_dynamics(x, u)
+        return x + self.dt * x_dot
+
+    def get_lqr_baseline(self):
+        device = self.masscart.device
+        x0 = torch.zeros((1, self.nx), dtype=torch.float32, device=device, requires_grad=True)
+        u0 = torch.zeros((1, self.nu), dtype=torch.float32, device=device, requires_grad=True)
+
+        f = self.continuous_dynamics(x0, u0)
+
+        A_rows = []
+        B_rows = []
+        for i in range(self.nx):
+            grad_x, grad_u = torch.autograd.grad(
+                f[0, i],
+                [x0, u0],
+                retain_graph=True,
+                allow_unused=False,
+            )
+            A_rows.append(grad_x[0].detach().cpu().numpy())
+            B_rows.append(grad_u[0].detach().cpu().numpy())
+
+        A = np.stack(A_rows, axis=0)
+        B = np.stack(B_rows, axis=0)
+
+        Q = np.diag([5.0, 1.0, 20.0, 2.0])
+        R = np.array([[0.1]])
+
+        S = la.solve_continuous_are(A, B, Q, R)
+        K = np.linalg.solve(R, B.T @ S)
+        return torch.tensor(K, dtype=torch.float32), torch.tensor(S, dtype=torch.float32)

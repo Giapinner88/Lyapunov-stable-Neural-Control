@@ -66,3 +66,36 @@ pyyaml
 # Core Formal Verification: Phục vụ Linear Relaxation cho các hàm phi tuyến (sin, cos)
 auto_LiRPA
 ```
+
+## So sanh Quadratic Lyapunov va alpha-CROWN (paper-style)
+
+Repo da bo sung script so sanh truc tiep 2 huong:
+- Quadratic baseline: LQR controller + V(x) = x^T P x
+- Neural baseline: NN controller + NN Lyapunov
+
+Script se tinh dong thoi:
+- Point-wise violation statistics tren box [-eps, eps]^2
+- Trajectory convergence statistics
+- Formal bound bang CROWN va alpha-CROWN
+- Certified radius (eps lon nhat co UB < 0)
+
+Chay lenh:
+
+```bash
+python compare_methods.py \
+	--eps 0.1 \
+	--rho 0.0 \
+	--point-grid 41 \
+	--traj-samples 500 \
+	--traj-horizon 100 \
+	--radius-min 0.005 \
+	--radius-max 0.12 \
+	--radius-steps 16 \
+	--output comparison_report.md
+```
+
+Ket qua se duoc luu trong file `comparison_report.md`.
+
+Luu y:
+- Neu chua cai `complete_verifier`, script se dung alpha-CROWN trong auto_LiRPA (CROWN-Optimized) lam moc tight-bound.
+- De chay day du alpha-beta-CROWN (co branch-and-bound beta split), can clone va cai dat `complete_verifier` nhu huong dan phia tren.
