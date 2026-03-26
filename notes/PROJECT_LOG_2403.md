@@ -1,5 +1,42 @@
 # 📊 PROJECT LOG - Lyapunov-stable-Neural-Control
 
+## 🆕 UPDATE HÔM NAY: Final-Mission Prep + Verify Encoding Fix (2026-03-26)
+
+### 1) Kết quả run strong CartPole
+
+- Run `cartpole_strong_20260326_191731.log` đã hoàn tất đến epoch 300.
+- Xu hướng tốt trong train-loop:
+  - Loss giữ ~0.002
+  - Max violation luôn âm và âm sâu dần
+  - Bank đầy 200k từ sớm (epoch ~100) và bão hòa đến cuối.
+
+### 2) Nâng cấp pipeline train để tiến gần paper hơn
+
+- Đã thêm resume chính thức và profile mạnh hơn cho CartPole:
+  - `--paper-profile`
+  - `--final-mission`
+- Đã thêm override CLI cho các siêu tham số quan trọng (bank/curriculum/attacker/local loss).
+- Đã thêm snapshot định kỳ theo checkpoint trong `checkpoints/cartpole/snapshots/`.
+
+### 3) Cải thiện bộ nhớ phản ví dụ (counterexample bank)
+
+- Thêm `bank_mode`:
+  - `fifo` (cũ)
+  - `reservoir` (mới, giữ mẫu đại diện theo toàn lịch sử để giảm quên mẫu cũ).
+
+### 4) Lỗi verify phát sinh và cách sửa
+
+- Lỗi gặp phải khi chạy `verify.py` trong env `lypen`:
+  - `UnicodeEncodeError: 'ascii' codec can't encode character '\u03c1'`
+- Nguyên nhân:
+  - Locale/encoding mặc định của tiến trình ghi file summary là ASCII.
+  - File summary có ký tự Unicode (`ρ`, `∈`).
+- Đã sửa trong `verify.py`:
+  - Mở file bằng `encoding="utf-8"`
+  - Dùng nhãn ASCII trong summary (`rho`, `x in`) để bền hơn với mọi locale.
+
+---
+
 **Last Updated:** 2026-03-24  
 **Session:** CartPole Integration, Repo Restructure, Import Hardening
 

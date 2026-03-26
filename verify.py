@@ -204,15 +204,15 @@ def verify_cartpole_roa(
     
     # Save summary
     summary_path = Path(output_dir) / "verification_summary.txt"
-    with open(summary_path, "w") as f:
+    with open(summary_path, "w", encoding="utf-8") as f:
         f.write("="*60 + "\n")
         f.write("CartPole Lyapunov-Stable Controller Verification\n")
         f.write("="*60 + "\n\n")
-        f.write(f"Empirical ρ: {rho_empirical:.6f}\n")
-        f.write(f"Verified ρ:  {rho_certified:.6f}\n")
+        f.write(f"Empirical rho: {rho_empirical:.6f}\n")
+        f.write(f"Verified rho:  {rho_certified:.6f}\n")
         f.write(f"ROA Ratio in Box: {roa_ratio:.2%}\n")
         f.write(f"Estimated ROA Volume: {roa_volume:.4f}\n")
-        f.write(f"Box Limits: x ∈ [{x_min.tolist()}, {x_max.tolist()}]\n")
+        f.write(f"Box Limits: x in [{x_min.tolist()}, {x_max.tolist()}]\n")
         if "crown_local_certified_eps" in result:
             f.write(
                 f"CROWN Local Certified Radius (L_inf): {result['crown_local_certified_eps']:.6f}"
