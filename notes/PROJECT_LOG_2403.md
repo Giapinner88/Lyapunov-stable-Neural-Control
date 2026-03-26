@@ -1,7 +1,56 @@
 # 📊 PROJECT LOG - Lyapunov-stable-Neural-Control
 
 **Last Updated:** 2026-03-24  
-**Session:** Bank Issue Fix & Training Strategy Optimization
+**Session:** CartPole Integration, Repo Restructure, Import Hardening
+
+---
+
+## 🆕 UPDATE MỚI NHẤT: CartPole Integration & Repo Hardening (2026-03-24)
+
+### 1) Tái cấu trúc thư mục để dễ kiểm soát
+
+- Checkpoint được gom về:
+  - `checkpoints/cartpole/cartpole_controller.pth`
+  - `checkpoints/cartpole/cartpole_lyapunov.pth`
+  - `checkpoints/pendulum/pendulum_controller.pth`
+  - `checkpoints/pendulum/pendulum_lyapunov.pth`
+- Kết quả báo cáo/graf được gom về `reports/`
+- Ghi chú và log được gom về `notes/`
+
+### 2) Sửa lỗi import toàn repo (quan trọng)
+
+- Đã xử lý lỗi kiểu `ModuleNotFoundError: No module named 'core'` khi chạy trực tiếp script bằng đường dẫn tuyệt đối.
+- Áp dụng bootstrap import cho toàn bộ script chính (train/verify/evaluate/diagnostic/test/verifier/core scripts).
+- Kiểm chứng lại bằng lệnh chạy trực tiếp file, đã qua.
+
+### 3) CartPole verification được nâng cấp
+
+- `verify.py` hiện có 2 chế độ:
+  - Sample-based bisection (mặc định, ổn định)
+  - CROWN local-radius verification (tùy chọn)
+- Đã thêm tùy chọn CLI:
+  - `--skip-crown`
+  - `--crown-eps-max`
+  - `--crown-method {CROWN, alpha-CROWN}`
+
+### 4) Documentation đã đồng bộ
+
+- Tạo hướng dẫn chạy nhanh: `docs/RUN_REPO.md`
+- Cập nhật `docs/CARTPOLE_README.md` theo đường dẫn mới (`checkpoints/`, `reports/`)
+- Cập nhật `README.md` root theo trạng thái thực tế repo
+
+### 5) Trạng thái CartPole hiện tại
+
+- **Mức hoàn thiện ước tính: ~80%**
+- Đã hoàn thành:
+  - Pipeline train/evaluate/verify chạy được
+  - OOP trainer và config cho CartPole
+  - ROA utility + bisection verify
+  - CROWN local check (optional)
+- Còn thiếu để đạt mức production verification mạnh:
+  - Tích hợp full `complete_verifier` (alpha-beta-CROWN) theo workflow specs/config chuẩn
+  - Cải thiện chất lượng certified ROA (hiện một số run cho ROA ratio thấp)
+  - Chuẩn hóa benchmark report reproducible
 
 ---
 
@@ -33,7 +82,7 @@
 1. Về dynamics thực: cả hai đều hội tụ tốt trong vùng kiểm tra.
 2. Về formal bound: alpha-CROWN chỉ cải thiện rất nhỏ so với CROWN trong cấu hình hiện tại.
 3. `complete_verifier` chưa được cài trong env hiện tại, nên chưa chạy full alpha-beta-CROWN (beta split).
-4. Báo cáo chi tiết được lưu tại: `comparison_report.md`.
+4. Báo cáo chi tiết được lưu tại: `reports/comparison_report.md`.
 
 ---
 

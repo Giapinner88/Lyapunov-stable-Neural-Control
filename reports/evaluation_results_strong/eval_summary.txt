@@ -1,0 +1,7 @@
+CartPole Controller Evaluation Results
+==================================================
+
+Total tests: 300
+Convergence rate: 13.00%
+Lyapunov decrease rate: 13.00%
+Stabilization rate: 38.67%

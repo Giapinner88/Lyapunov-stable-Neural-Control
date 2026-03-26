@@ -30,6 +30,7 @@ class AttackerConfig:
 @dataclass
 class CEGISConfig:
     bank_capacity: int = 200000
+    bank_mode: str = "fifo"
     replay_new_ratio: float = 0.35
     violation_margin: float = 5e-4
     local_box_radius: float = 0.20

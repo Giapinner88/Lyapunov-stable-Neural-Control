@@ -6,10 +6,14 @@ class CounterexampleBank:
     Ngân hàng lưu phản ví dụ x_bad để learner luôn học trên cả lỗi mới lẫn lỗi cũ.
     """
 
-    def __init__(self, capacity: int = 50000, storage_device: str = "cpu"):
+    def __init__(self, capacity: int = 50000, storage_device: str = "cpu", mode: str = "fifo"):
         self.capacity = int(capacity)
         self.storage_device = storage_device
+        self.mode = str(mode).lower()
+        if self.mode not in {"fifo", "reservoir"}:
+            raise ValueError("CounterexampleBank mode must be 'fifo' or 'reservoir'.")
         self._x = None
+        self._seen = 0
 
     @property
     def size(self) -> int:
@@ -21,13 +25,33 @@ class CounterexampleBank:
         x_bad = x_bad.detach().to(self.storage_device)
         if x_bad.numel() == 0:
             return
-        if self._x is None:
-            self._x = x_bad[-self.capacity :]
+        self._seen += int(x_bad.shape[0])
+
+        if self.mode == "fifo":
+            if self._x is None:
+                self._x = x_bad[-self.capacity :]
+                return
+
+            self._x = torch.cat([self._x, x_bad], dim=0)
+            if self._x.shape[0] > self.capacity:
+                self._x = self._x[-self.capacity :]
             return
 
-        self._x = torch.cat([self._x, x_bad], dim=0)
-        if self._x.shape[0] > self.capacity:
-            self._x = self._x[-self.capacity :]
+        # Reservoir mode keeps a uniform sample from all historical counterexamples.
+        if self._x is None:
+            self._x = x_bad[:0].clone()
+
+        total_seen_before_batch = self._seen - int(x_bad.shape[0])
+        for idx in range(x_bad.shape[0]):
+            sample = x_bad[idx : idx + 1]
+            current_seen = total_seen_before_batch + idx + 1
+            if self._x.shape[0] < self.capacity:
+                self._x = torch.cat([self._x, sample], dim=0)
+                continue
+
+            replace_idx = int(torch.randint(0, current_seen, (1,), device=self._x.device).item())
+            if replace_idx < self.capacity:
+                self._x[replace_idx : replace_idx + 1] = sample
 
     def sample(self, n: int, device: torch.device, dtype: torch.dtype) -> torch.Tensor:
         if self.size == 0:
@@ -197,6 +221,7 @@ class CEGISLoop:
         optimizer,
         bank_capacity: int = 50000,
         bank_storage_device: str = "cpu",
+        bank_mode: str = "fifo",
         replay_new_ratio: float = 0.25,
         violation_margin: float = 5e-4,
         local_box_radius: float = 0.15,
@@ -209,7 +234,7 @@ class CEGISLoop:
         self.lyapunov = lyapunov
         self.attacker = attacker
         self.optimizer = optimizer
-        self.counterexample_bank = CounterexampleBank(bank_capacity, bank_storage_device)
+        self.counterexample_bank = CounterexampleBank(bank_capacity, bank_storage_device, bank_mode)
         self.replay_new_ratio = float(replay_new_ratio)
         self.violation_margin = float(violation_margin)
         self.local_box_radius = float(local_box_radius)

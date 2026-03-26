@@ -9,12 +9,147 @@ from core.training_config import get_default_config
 from core.trainer import LyapunovTrainer
 
 
-def train(system="pendulum", pretrain_epochs=150, cegis_epochs=350, alpha_lyap=0.08):
+def apply_cartpole_strong_profile(config) -> None:
+    if config.system.name != "cartpole":
+        return
+    # Stronger profile to improve certified region for cartpole.
+    config.loop.learning_rate = 5e-4
+    config.loop.learner_updates = 4
+    config.loop.batch_size = 1024
+    config.loop.train_batch_size = 1024
+    config.loop.attack_seed_size = 512
+    config.loop.sweep_every = 20
+    config.loop.checkpoint_every = 20
+    config.loop.lqr_anchor_radius = (0.10, 0.10, 0.10, 0.10)
+    config.curriculum.start_scale = 0.5
+    config.cegis.local_box_samples = 1024
+    config.cegis.local_box_weight = 0.50
+
+
+def apply_cartpole_paper_profile(config) -> None:
+    if config.system.name != "cartpole":
+        return
+    # Aggressive profile aimed at getting closer to paper-level behavior.
+    config.loop.learning_rate = 3e-4
+    config.loop.learner_updates = 5
+    config.loop.batch_size = 1024
+    config.loop.train_batch_size = 1024
+    config.loop.attack_seed_size = 640
+    config.loop.sweep_every = 20
+    config.loop.checkpoint_every = 20
+    config.curriculum.start_scale = 0.4
+    config.curriculum.end_scale = 1.0
+
+    config.attacker.num_steps = 120
+    config.attacker.num_restarts = 8
+    config.attacker.step_size = 0.015
+
+    config.cegis.bank_capacity = 500000
+    config.cegis.bank_mode = "reservoir"
+    config.cegis.replay_new_ratio = 0.20
+    config.cegis.violation_margin = 3e-4
+    config.cegis.local_box_samples = 1536
+    config.cegis.local_box_weight = 0.60
+
+
+def apply_cartpole_final_mission_profile(config) -> None:
+    if config.system.name != "cartpole":
+        return
+    # Final aggressive profile for pushing closest to paper-level results.
+    config.loop.learning_rate = 2e-4
+    config.loop.learner_updates = 6
+    config.loop.batch_size = 1280
+    config.loop.train_batch_size = 1280
+    config.loop.attack_seed_size = 768
+    config.loop.sweep_every = 10
+    config.loop.checkpoint_every = 10
+    config.loop.lqr_anchor_radius = (0.08, 0.08, 0.08, 0.08)
+    config.curriculum.start_scale = 0.35
+    config.curriculum.end_scale = 1.0
+
+    config.attacker.num_steps = 160
+    config.attacker.num_restarts = 10
+    config.attacker.step_size = 0.012
+
+    config.cegis.bank_capacity = 800000
+    config.cegis.bank_mode = "reservoir"
+    config.cegis.replay_new_ratio = 0.18
+    config.cegis.violation_margin = 2e-4
+    config.cegis.local_box_radius = 0.15
+    config.cegis.local_box_samples = 2048
+    config.cegis.local_box_weight = 0.70
+    config.cegis.equilibrium_weight = 0.15
+
+
+def train(
+    system="cartpole",
+    pretrain_epochs=150,
+    cegis_epochs=350,
+    alpha_lyap=0.08,
+    resume=False,
+    skip_pretrain_if_resumed=True,
+    strong_profile=False,
+    paper_profile=False,
+    final_mission=False,
+    bank_capacity=None,
+    replay_new_ratio=None,
+    bank_mode=None,
+    curriculum_start_scale=None,
+    curriculum_end_scale=None,
+    local_box_samples=None,
+    local_box_weight=None,
+    attacker_steps=None,
+    attacker_restarts=None,
+):
     config = get_default_config(system)
+
+    if strong_profile:
+        apply_cartpole_strong_profile(config)
+    if paper_profile:
+        apply_cartpole_paper_profile(config)
+    if final_mission:
+        apply_cartpole_final_mission_profile(config)
+
     config.loop.pretrain_epochs = int(pretrain_epochs)
     config.loop.cegis_epochs = int(cegis_epochs)
     config.loop.alpha_lyap = float(alpha_lyap)
-    LyapunovTrainer(config).run()
+
+    if bank_capacity is not None:
+        config.cegis.bank_capacity = int(bank_capacity)
+    if replay_new_ratio is not None:
+        config.cegis.replay_new_ratio = float(replay_new_ratio)
+    if bank_mode is not None:
+        config.cegis.bank_mode = str(bank_mode).lower()
+    if curriculum_start_scale is not None:
+        config.curriculum.start_scale = float(curriculum_start_scale)
+    if curriculum_end_scale is not None:
+        config.curriculum.end_scale = float(curriculum_end_scale)
+    if local_box_samples is not None:
+        config.cegis.local_box_samples = int(local_box_samples)
+    if local_box_weight is not None:
+        config.cegis.local_box_weight = float(local_box_weight)
+    if attacker_steps is not None:
+        config.attacker.num_steps = int(attacker_steps)
+    if attacker_restarts is not None:
+        config.attacker.num_restarts = int(attacker_restarts)
+
+    print("[Config]", {
+        "system": config.system.name,
+        "pretrain_epochs": config.loop.pretrain_epochs,
+        "cegis_epochs": config.loop.cegis_epochs,
+        "alpha_lyap": config.loop.alpha_lyap,
+        "bank_capacity": config.cegis.bank_capacity,
+        "bank_mode": config.cegis.bank_mode,
+        "replay_new_ratio": config.cegis.replay_new_ratio,
+        "curriculum": (config.curriculum.start_scale, config.curriculum.end_scale),
+        "attacker_steps": config.attacker.num_steps,
+        "attacker_restarts": config.attacker.num_restarts,
+    })
+
+    LyapunovTrainer(config).run(
+        resume=bool(resume),
+        skip_pretrain_if_resumed=bool(skip_pretrain_if_resumed),
+    )
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Huấn luyện Lyapunov-stable controller")
@@ -22,6 +157,36 @@ if __name__ == "__main__":
     parser.add_argument("--pretrain-epochs", type=int, default=150)
     parser.add_argument("--cegis-epochs", type=int, default=350)
     parser.add_argument("--alpha-lyap", type=float, default=0.08)
+    parser.add_argument("--resume", action="store_true", help="Resume from existing checkpoints if available")
+    parser.add_argument(
+        "--no-skip-pretrain",
+        action="store_true",
+        help="When resuming, still run pre-training before CEGIS",
+    )
+    parser.add_argument(
+        "--strong-profile",
+        action="store_true",
+        help="Use stronger cartpole-focused hyperparameters",
+    )
+    parser.add_argument(
+        "--paper-profile",
+        action="store_true",
+        help="Use aggressive paper-oriented cartpole profile",
+    )
+    parser.add_argument(
+        "--final-mission",
+        action="store_true",
+        help="Use strongest paper-chasing cartpole profile",
+    )
+    parser.add_argument("--bank-capacity", type=int, default=None)
+    parser.add_argument("--replay-new-ratio", type=float, default=None)
+    parser.add_argument("--bank-mode", type=str, default=None, choices=["fifo", "reservoir"])
+    parser.add_argument("--curriculum-start-scale", type=float, default=None)
+    parser.add_argument("--curriculum-end-scale", type=float, default=None)
+    parser.add_argument("--local-box-samples", type=int, default=None)
+    parser.add_argument("--local-box-weight", type=float, default=None)
+    parser.add_argument("--attacker-steps", type=int, default=None)
+    parser.add_argument("--attacker-restarts", type=int, default=None)
     args = parser.parse_args()
 
     train(
@@ -29,4 +194,18 @@ if __name__ == "__main__":
         pretrain_epochs=args.pretrain_epochs,
         cegis_epochs=args.cegis_epochs,
         alpha_lyap=args.alpha_lyap,
+        resume=args.resume,
+        skip_pretrain_if_resumed=not args.no_skip_pretrain,
+        strong_profile=args.strong_profile,
+        paper_profile=args.paper_profile,
+        final_mission=args.final_mission,
+        bank_capacity=args.bank_capacity,
+        replay_new_ratio=args.replay_new_ratio,
+        bank_mode=args.bank_mode,
+        curriculum_start_scale=args.curriculum_start_scale,
+        curriculum_end_scale=args.curriculum_end_scale,
+        local_box_samples=args.local_box_samples,
+        local_box_weight=args.local_box_weight,
+        attacker_steps=args.attacker_steps,
+        attacker_restarts=args.attacker_restarts,
     )

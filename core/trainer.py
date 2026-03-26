@@ -60,6 +60,7 @@ class LyapunovTrainer:
             optimizer=self.optimizer,
             bank_capacity=self.config.cegis.bank_capacity,
             bank_storage_device=self.device.type,
+            bank_mode=self.config.cegis.bank_mode,
             replay_new_ratio=self.config.cegis.replay_new_ratio,
             violation_margin=self.config.cegis.violation_margin,
             local_box_radius=self.config.cegis.local_box_radius,
@@ -75,6 +76,29 @@ class LyapunovTrainer:
         # Initialize ROA tracker for CartPole optimization
         self.roa_tracker = ROATracker(gamma=0.9)
         self.current_rho = None  # Will be computed during training
+
+    def _save_snapshot(self, tag: str) -> None:
+        controller_path = Path(self.config.output.controller_path)
+        lyapunov_path = Path(self.config.output.lyapunov_path)
+        snapshot_dir = controller_path.parent / "snapshots"
+        snapshot_dir.mkdir(parents=True, exist_ok=True)
+
+        c_name = f"{controller_path.stem}_{tag}.pth"
+        v_name = f"{lyapunov_path.stem}_{tag}.pth"
+        torch.save(self.controller.state_dict(), snapshot_dir / c_name)
+        torch.save(self.lyapunov.state_dict(), snapshot_dir / v_name)
+
+    def load_checkpoints(self, controller_path: str | None = None, lyapunov_path: str | None = None) -> bool:
+        controller_ckpt = Path(controller_path or self.config.output.controller_path)
+        lyapunov_ckpt = Path(lyapunov_path or self.config.output.lyapunov_path)
+        if not (controller_ckpt.exists() and lyapunov_ckpt.exists()):
+            return False
+
+        self.controller.load_state_dict(torch.load(controller_ckpt, map_location=self.device))
+        self.lyapunov.load_state_dict(torch.load(lyapunov_ckpt, map_location=self.device))
+        print(f"[Resume] Loaded controller from: {controller_ckpt}")
+        print(f"[Resume] Loaded lyapunov  from: {lyapunov_ckpt}")
+        return True
 
     def _build_dynamics(self):
         if self.system_name == "pendulum":
@@ -280,6 +304,7 @@ class LyapunovTrainer:
                     f"Bank: {bank_size} | Loss: {total_loss / self.config.loop.learner_updates:.6f} | "
                     f"Max Violt: {info['max_violation']:.6f} | Mean Violt: {info['mean_violation']:.6f} | {rho_str}"
                 )
+                self._save_snapshot(f"ep{epoch:03d}")
 
             self._sweep_local_region(epoch, current_bounds)
 
@@ -290,10 +315,27 @@ class LyapunovTrainer:
         torch.save(self.lyapunov.state_dict(), self.config.output.lyapunov_path)
         print("Đã lưu mô hình thành công!")
 
-    def run(self) -> None:
+    def run(
+        self,
+        resume: bool = False,
+        skip_pretrain_if_resumed: bool = True,
+        controller_path: str | None = None,
+        lyapunov_path: str | None = None,
+    ) -> None:
         print(f"Sử dụng thiết bị: {self.device}")
         print(f"Hệ động lực: {self.system_name}")
-        self._pretrain_lqr()
+        resumed = False
+        if resume:
+            resumed = self.load_checkpoints(controller_path=controller_path, lyapunov_path=lyapunov_path)
+            if not resumed:
+                print("[Resume] Checkpoints not found, training from current initialization.")
+
+        should_pretrain = not (resumed and skip_pretrain_if_resumed)
+        if should_pretrain and self.config.loop.pretrain_epochs > 0:
+            self._pretrain_lqr()
+        elif resumed and skip_pretrain_if_resumed:
+            print("[Resume] Skip pre-training phase and continue CEGIS directly.")
+
         self._run_cegis()
         self._save()
 

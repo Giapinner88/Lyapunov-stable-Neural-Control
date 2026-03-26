@@ -1,101 +1,102 @@
-# Lyapunov-stable Neural Control: Pendulum & Cart-Pole
+# Lyapunov-Stable Neural Control
 
-## 🎯 Mục tiêu Dự án
-Dự án này tái hiện và mở rộng kiến trúc từ bài báo **"Lyapunov-stable Neural Control" (Yang et al., 2024)**. 
+Repository for Lyapunov-stable neural control with two systems:
+- CartPole (priority track)
+- Pendulum (kept for continuation)
 
-Thay vì chỉ kiểm chứng trên hệ con lắc ngược (Inverted Pendulum), dự án được cấu trúc lại bằng một bộ khung Hướng đối tượng (OOP) tổng quát cho vòng lặp CEGIS (Counter-Example Guided Inductive Synthesis). Mục đích là để có thể dễ dàng mở rộng (scale-up) thuật toán sang các hệ thống động lực học thiếu dẫn động (underactuated) bậc cao hơn, tiêu biểu là hệ **Cart-Pole** (4D).
+## Current Status
 
-**Các mục tiêu cốt lõi:**
-1. **Generic CEGIS Pipeline:** Tách biệt hoàn toàn phần thuật toán huấn luyện (Neural Controller & Neural Lyapunov) khỏi phần động lực học vật lý (Dynamics).
-2. **Toán học hóa Hàm Lyapunov:** Đảm bảo kiến trúc mạng tuân thủ chặt chẽ công thức toán học nguyên thủy $V(x) = |\phi_V(x) - \phi_V(0)| + \|(\epsilon I + R^TR)x\|_1$ để đảm bảo $V(0) = 0$ tuyệt đối.
-3. **Formal Verification:** Tích hợp bộ giải $\alpha,\beta$-CROWN để chứng minh ranh giới an toàn (Region of Attraction - ROA) bằng toán học nghiêm ngặt, khắc phục các điểm mù (counter-examples) mà phương pháp lấy mẫu (PGD) bỏ sót.
+### CartPole progress: ~80%
 
-## ⚙️ Hướng dẫn Cài đặt (Conda Environment)
+Implemented:
+- OOP training pipeline with CEGIS/PGD in [core/trainer.py](core/trainer.py)
+- CartPole dynamics and LQR baseline in [core/dynamics.py](core/dynamics.py)
+- Config-based training setup in [core/training_config.py](core/training_config.py)
+- ROA utilities and rho estimation in [core/roa_utils.py](core/roa_utils.py)
+- Verification CLI with sample-based bisection in [verify.py](verify.py)
+- Optional CROWN local-radius check in [core/verification.py](core/verification.py)
+- CartPole evaluation script in [evaluate_cartpole.py](evaluate_cartpole.py)
+- Direct-execution import fixes for scripts (no more `No module named core`)
 
-Để kiểm soát chặt chẽ các phụ thuộc tuyến tính của công cụ xác minh hình thức (đặc biệt là `auto_LiRPA` và bộ giải CROWN), dự án này bắt buộc phải chạy trong môi trường ảo được cô lập.
+Pending / not fully completed yet:
+- Full alpha-beta-CROWN complete_verifier workflow integration for CartPole specs
+- Better certified ROA quality (current sample-based ROA ratio can be very small)
+- Unified benchmark report pipeline for reproducible final metrics
 
-**Bước 1: Khởi tạo môi trường ảo với Conda**
-Bản chất của Conda không chỉ quản lý các gói Python mà còn quản lý các thư viện C/C++ ngầm định (ví dụ như các driver CUDA hay thư viện toán học cấp thấp) giúp PyTorch tính toán đồ thị tính (computation graph) ổn định hơn.
-```bash
-conda create -n lyapunov_env python=3.10 -y
-conda activate lyapunov_env
+## Repository Layout
+
+```text
+core/                    # Models, dynamics, training, verification modules
+checkpoints/
+  cartpole/              # CartPole checkpoints
+  pendulum/              # Pendulum checkpoints
+reports/                 # Generated verification/evaluation outputs
+notes/                   # Project notes/logs
+docs/
+  RUN_REPO.md            # Practical run commands
+  CARTPOLE_README.md     # CartPole details
+  pipeline.md            # Theory/pipeline notes
 ```
 
-**Bước 2: Cài đặt các thư viện lõi**
-Cài đặt trực tiếp từ file requirements:
+## Quick Start
+
+### 1) Environment
+
 ```bash
+conda activate lypen
 pip install -r requirements.txt
 ```
 
-**Bước 3: Tích hợp `complete_verifier` (alpha, beta-CROWN)**
-Thuật toán Bisection cần gọi module `complete_verifier.abcrown` để xác minh. Bạn cần clone mã nguồn của công cụ này và đưa vào biến môi trường:
-```bash
-# Tạo thư mục chứa bộ xác minh
-mkdir -p verification
-cd verification
-
-# Clone mã nguồn alpha, beta-CROWN
-git clone [https://github.com/Verified-Intelligence/alpha-beta-CROWN.git](https://github.com/Verified-Intelligence/alpha-beta-CROWN.git) complete_verifier
-
-# Cập nhật PYTHONPATH để Python có thể nhận diện được module này
-export PYTHONPATH="$PWD/complete_verifier:$PYTHONPATH"
-cd ..
-```
-*(Lưu ý: Nếu không có bước 3, hệ thống sẽ báo lỗi `ModuleNotFoundError: No module named 'complete_verifier'` khi chạy bisection)*.
-
----
-
-### 2. File `requirements.txt`
-
-Bản chất của việc huấn luyện hệ thống điều khiển ổn định Lyapunov đòi hỏi các phép tính đạo hàm tự động (Auto-Grad) liên tục và kiểm tra ranh giới phi tuyến. Dưới đây là các thư viện tối giản nhất để hệ thống hoạt động:
-
-```text
-# Deep Learning Core
-torch>=2.0.0
-
-# Tính toán ma trận và trực quan hóa (vẽ phase portrait, contour 2D/4D)
-numpy
-matplotlib
-
-# Giải tích ký hiệu (Dùng để tính Jacobian tuyến tính hóa cho LQR baseline)
-sympy
-
-# Phân tích cú pháp cấu hình cho bộ giải CROWN
-pyyaml
-
-# Core Formal Verification: Phục vụ Linear Relaxation cho các hàm phi tuyến (sin, cos)
-auto_LiRPA
-```
-
-## So sanh Quadratic Lyapunov va alpha-CROWN (paper-style)
-
-Repo da bo sung script so sanh truc tiep 2 huong:
-- Quadratic baseline: LQR controller + V(x) = x^T P x
-- Neural baseline: NN controller + NN Lyapunov
-
-Script se tinh dong thoi:
-- Point-wise violation statistics tren box [-eps, eps]^2
-- Trajectory convergence statistics
-- Formal bound bang CROWN va alpha-CROWN
-- Certified radius (eps lon nhat co UB < 0)
-
-Chay lenh:
+Optional for CROWN local verification:
 
 ```bash
-python compare_methods.py \
-	--eps 0.1 \
-	--rho 0.0 \
-	--point-grid 41 \
-	--traj-samples 500 \
-	--traj-horizon 100 \
-	--radius-min 0.005 \
-	--radius-max 0.12 \
-	--radius-steps 16 \
-	--output comparison_report.md
+pip install auto-LiRPA
 ```
 
-Ket qua se duoc luu trong file `comparison_report.md`.
+If using local alpha-beta-CROWN clone in this repo:
 
-Luu y:
-- Neu chua cai `complete_verifier`, script se dung alpha-CROWN trong auto_LiRPA (CROWN-Optimized) lam moc tight-bound.
-- De chay day du alpha-beta-CROWN (co branch-and-bound beta split), can clone va cai dat `complete_verifier` nhu huong dan phia tren.
+```bash
+export PYTHONPATH="${PYTHONPATH}:$(pwd):$(pwd)/alpha-beta-CROWN:$(pwd)/alpha-beta-CROWN/complete_verifier"
+```
+
+### 2) Train CartPole
+
+```bash
+python train.py --system cartpole --pretrain-epochs 120 --cegis-epochs 320 --alpha-lyap 0.05
+```
+
+Outputs:
+- checkpoints/cartpole/cartpole_controller.pth
+- checkpoints/cartpole/cartpole_lyapunov.pth
+
+### 3) Verify CartPole
+
+Sample-based only:
+
+```bash
+python verify.py --skip-crown --output-dir reports/verification_results
+```
+
+With CROWN local radius:
+
+```bash
+python verify.py --crown-method CROWN --crown-eps-max 0.2 --output-dir reports/verification_results
+```
+
+### 4) Evaluate CartPole
+
+```bash
+python evaluate_cartpole.py --n-tests 100 --output-dir reports/evaluation_results
+```
+
+## Pendulum Track (kept)
+
+- Phase portrait: [evaluate_pendulum.py](evaluate_pendulum.py)
+- Diagnostic scripts: [diagnostic.py](diagnostic.py), [test_verifier.py](test_verifier.py)
+- Comparison script: [compare_methods.py](compare_methods.py)
+
+## Documentation
+
+- Practical run guide: [docs/RUN_REPO.md](docs/RUN_REPO.md)
+- CartPole details: [docs/CARTPOLE_README.md](docs/CARTPOLE_README.md)
+- Theory notes: [docs/pipeline.md](docs/pipeline.md), [docs/THEORY.md](docs/THEORY.md)

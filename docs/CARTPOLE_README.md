@@ -50,7 +50,14 @@ train.py                  # Training entry point
 verify.py                 # Post-training verification
 evaluate_cartpole.py      # Closed-loop evaluation
 
+checkpoints/
+├── cartpole/             # CartPole model checkpoints
+└── pendulum/             # Pendulum model checkpoints
+
+reports/                  # Verification/evaluation outputs
+
 docs/
+├── RUN_REPO.md           # Practical run guide (quick commands)
 ├── pipeline.md           # Detailed theoretical pipeline
 └── THEORY.md             # Mathematical background
 ```
@@ -60,8 +67,8 @@ docs/
 ### 1. Install Dependencies
 
 ```bash
-pip install torch numpy scipy
-# Optional: for verification with auto-LiRPA
+pip install -r requirements.txt
+# Optional: CROWN-based local certificate
 pip install auto-LiRPA
 ```
 
@@ -77,27 +84,34 @@ python train.py --system cartpole --pretrain-epochs 120 --cegis-epochs 320
 - `--alpha-lyap`: Lyapunov decrease rate (default: 0.05)
 
 This will save:
-- `cartpole_controller.pth` - Trained neural controller
-- `cartpole_lyapunov.pth` - Trained Lyapunov function
+- `checkpoints/cartpole/cartpole_controller.pth` - Trained neural controller
+- `checkpoints/cartpole/cartpole_lyapunov.pth` - Trained Lyapunov function
 
 ### 3. Verify & Evaluate
 
 ```bash
 # Run bisection verification to find certified ROA size
-python verify.py --controller cartpole_controller.pth --lyapunov cartpole_lyapunov.pth
+python verify.py \
+  --controller checkpoints/cartpole/cartpole_controller.pth \
+  --lyapunov checkpoints/cartpole/cartpole_lyapunov.pth \
+  --output-dir reports/verification_results
 
 # Evaluate controller on random initial conditions
-python evaluate_cartpole.py --controller cartpole_controller.pth --lyapunov cartpole_lyapunov.pth --n-tests 100
+python evaluate_cartpole.py \
+  --controller checkpoints/cartpole/cartpole_controller.pth \
+  --lyapunov checkpoints/cartpole/cartpole_lyapunov.pth \
+  --n-tests 100 \
+  --output-dir reports/evaluation_results
 ```
 
 ## Training Pipeline
 
-### Phase 1: LQR Pre-training (150 epochs)
+### Phase 1: LQR Pre-training (120 epochs)
 Initialize controller and Lyapunov function using LQR baseline near the origin.
 
 **Goal:** Get good initial weights before adversarial training.
 
-### Phase 2: CEGIS Loop (350 epochs)
+### Phase 2: CEGIS Loop (320 epochs)
 Counter-Example Guided Inductive Synthesis:
 1. **Falsifier (PGD)**: Find states that violate Lyapunov decrease condition
 2. **Learner (SGD)**: Update network to satisfy conditions on found counterexamples
@@ -127,7 +141,21 @@ Every 20 epochs, we compute:
 
 After training, run:
 ```bash
-python verify.py --controller cartpole_controller.pth --lyapunov cartpole_lyapunov.pth
+python verify.py \
+  --controller checkpoints/cartpole/cartpole_controller.pth \
+  --lyapunov checkpoints/cartpole/cartpole_lyapunov.pth \
+  --output-dir reports/verification_results
+```
+
+Optional local certificate (CROWN):
+
+```bash
+python verify.py \
+  --controller checkpoints/cartpole/cartpole_controller.pth \
+  --lyapunov checkpoints/cartpole/cartpole_lyapunov.pth \
+  --crown-method CROWN \
+  --crown-eps-max 0.2 \
+  --output-dir reports/verification_results
 ```
 
 This uses **bisection search** to find the maximum certified ρ:
@@ -148,7 +176,11 @@ This uses **bisection search** to find the maximum certified ρ:
 
 Run 100 random trajectories:
 ```bash
-python evaluate_cartpole.py --n-tests 100
+python evaluate_cartpole.py \
+  --controller checkpoints/cartpole/cartpole_controller.pth \
+  --lyapunov checkpoints/cartpole/cartpole_lyapunov.pth \
+  --n-tests 100 \
+  --output-dir reports/evaluation_results
 ```
 
 **Metrics:**
@@ -263,4 +295,4 @@ If you use this implementation, please cite:
 
 ---
 
-For questions or issues, refer to the `docs/pipeline.md` for theoretical details or check individual module docstrings.
+For quick commands, see `docs/RUN_REPO.md`. For theory details, see `docs/pipeline.md`.
