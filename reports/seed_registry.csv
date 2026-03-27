@@ -12,3 +12,4 @@ cartpole_20260327_234053,2026-03-27T23:40:53,cartpole,42,False,False,False,False
 cartpole_20260327_234227,2026-03-27T23:42:27,cartpole,42,False,False,False,False,False,0,10,0.01,200000,fifo,0.35
 cartpole_20260327_234408,2026-03-27T23:44:08,cartpole,42,False,False,False,False,False,0,21,0.01,200000,fifo,0.35
 cartpole_20260327_235751,2026-03-27T23:57:51,cartpole,809179528,False,False,False,False,True,150,350,0.01,800000,reservoir,0.25
+cartpole_20260328_000353,2026-03-28T00:03:53,cartpole,809541042,False,False,False,False,True,150,400,0.01,800000,reservoir,0.25
