@@ -1,0 +1,44 @@
+{
+  "method_comparison": {
+    "notes": [
+      "SOS/SDP curve here is a proxy using quadratic Lyapunov V(x)=x^T P x from LQR Riccati solution.",
+      "SMT-like region is approximated by dense-grid one-step Lyapunov/decrease verification.",
+      "For exact SOS/SMT replication, external solver integration is required."
+    ],
+    "selected_neural_checkpoint": {
+      "source": "final",
+      "controller_path": "checkpoints/cartpole/cartpole_controller.pth",
+      "lyapunov_path": "checkpoints/cartpole/cartpole_lyapunov.pth",
+      "select_best_checkpoint": false,
+      "best_metric": "verified_area_pct"
+    },
+    "neural": {
+      "rho": 0.0005859665921889246,
+      "sublevel_area_pct": 0.011573627560665097,
+      "verified_area_pct": 0.007715751707110065
+    },
+    "sos_sdp_proxy_quadratic": {
+      "rho": 0.04712027683854103,
+      "sublevel_area_pct": 0.5285289919370394,
+      "verified_area_pct": 0.5285289919370394
+    }
+  },
+  "checkpoint_count": 19,
+  "grid_size": 161,
+  "slice": {
+    "fixed": {
+      "x": 0.0,
+      "x_dot": 0.0
+    },
+    "varying": {
+      "theta": [
+        -1.0,
+        1.0
+      ],
+      "theta_dot": [
+        -1.0,
+        1.0
+      ]
+    }
+  }
+}

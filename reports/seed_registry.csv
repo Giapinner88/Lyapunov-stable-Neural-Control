@@ -1,0 +1,2 @@
+run_id,timestamp,system,seed,deterministic,resume,strong_profile,paper_profile,final_mission,pretrain_epochs,cegis_epochs,alpha_lyap,bank_capacity,bank_mode,replay_new_ratio
+cartpole_20260327_120245,2026-03-27T12:02:45,cartpole,766271436,False,False,False,False,False,150,350,0.08,200000,fifo,0.35
