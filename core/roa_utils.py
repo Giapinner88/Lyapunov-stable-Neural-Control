@@ -13,112 +13,60 @@ from typing import Tuple, Optional, Dict
 
 
 def compute_rho_boundary(
-    lyapunov: nn.Module,
-    dynamics: nn.Module,
-    controller: nn.Module,
-    x_min: torch.Tensor,
-    x_max: torch.Tensor,
-    n_boundary_samples: int = 1000,
-    n_pgd_steps: int = 50,
-    pgd_step_size: float = 0.02,
-    gamma: float = 0.9,
-    device: torch.device = torch.device('cpu'),
-    verbose: bool = False,
+    lyapunov: nn.Module, dynamics: nn.Module, controller: nn.Module,
+    x_min: torch.Tensor, x_max: torch.Tensor,
+    n_boundary_samples: int = 1000, n_pgd_steps: int = 50,
+    pgd_step_size: float = 0.02, gamma: float = 0.9,
+    device: torch.device = torch.device('cpu'), verbose: bool = False,
 ) -> Tuple[float, torch.Tensor]:
-    """
-    Compute ρ = γ · min_{x ∈ ∂B} V(x)
-    
-    Strategy:
-    1. Sample points on boundary of box B = [x_min, x_max]
-    2. Use PGD to minimize V(x) for each boundary point
-    3. Find minimum V value on boundary
-    4. Return ρ = γ * min_V
-    
-    Args:
-        lyapunov: LyapunovNet(x) → V(x)
-        dynamics: CartpoleDynamics or PendulumDynamics
-        controller: NeuralController(x) → u
-        x_min, x_max: box boundaries
-        n_boundary_samples: number of boundary sample points
-        n_pgd_steps: steps of PGD for V minimization
-        pgd_step_size: step size for PGD
-        gamma: scaling factor for ρ (typically 0.9)
-        device: computation device
-        verbose: print debug info
-        
-    Returns:
-        rho: Computed ROA threshold
-        x_boundary_solutions: States found on boundary
-    """
     
     lyapunov.eval()
-    controller.eval()
-    dynamics.eval()
-    
     nx = x_min.shape[0]
-    batch_size = n_boundary_samples
-    device = x_min.device
-    dtype = x_min.dtype
-    
-    # Step 1: Sample points on boundary of box B
-    # Strategy: Place points near edges (either x_min or x_max for each dimension)
-    x_boundary = []
-    for dim in range(nx):
-        # Half samples near x_min[dim], half near x_max[dim]
-        n_this_face = batch_size // (2 * nx) + 1
-        
-        # Near x_min[dim]
-        x_face = torch.rand((n_this_face, nx), device=device, dtype=dtype) * (x_max - x_min) + x_min
-        x_face[:, dim] = x_min[dim] + 1e-3 * (x_max[dim] - x_min[dim])  # Stick to boundary
-        x_boundary.append(x_face)
-        
-        # Near x_max[dim]
-        x_face = torch.rand((n_this_face, nx), device=device, dtype=dtype) * (x_max - x_min) + x_min
-        x_face[:, dim] = x_max[dim] - 1e-3 * (x_max[dim] - x_min[dim])  # Stick to boundary
-        x_boundary.append(x_face)
-    
-    x_boundary = torch.cat(x_boundary, dim=0)[:batch_size]  # Trim to size
-    
-    # Step 2: PGD to minimize V(x) on boundary
+    n_per_face = max(1, n_boundary_samples // (2 * nx))
     min_v_values = []
     x_solutions = []
-    
-    for i, x_init in enumerate(x_boundary):
-        x = x_init.unsqueeze(0).clone().detach().requires_grad_(True)
-        
-        for step in range(n_pgd_steps):
-            with torch.enable_grad():
-                v = lyapunov(x)
-                loss = torch.sum(v)  # Minimize V
+
+    for dim in range(nx):
+        for is_max_face in [False, True]:
+            # Khởi tạo điểm ngẫu nhiên
+            x_face = torch.rand((n_per_face, nx), device=device, dtype=x_min.dtype) * (x_max - x_min) + x_min
+            # Ép điểm nằm chặt trên mặt phẳng tương ứng
+            if is_max_face:
+                x_face[:, dim] = x_max[dim]
+            else:
+                x_face[:, dim] = x_min[dim]
+                
+            x_face = x_face.clone().detach().requires_grad_(True)
             
-            loss.backward()
+            for step in range(n_pgd_steps):
+                v = lyapunov(x_face)
+                loss = torch.sum(v)
+                grad = torch.autograd.grad(loss, x_face)[0]
+                
+                with torch.no_grad():
+                    # Gradient descent để tìm V nhỏ nhất
+                    span = x_max - x_min
+                    x_face.data = x_face.data - pgd_step_size * span * torch.sign(grad)
+                    x_face.data = torch.clamp(x_face.data, min=x_min, max=x_max)
+                    
+                    # QUAN TRỌNG: Khóa x trở lại mặt phẳng vỏ hộp (Project back to boundary)
+                    if is_max_face:
+                        x_face.data[:, dim] = x_max[dim]
+                    else:
+                        x_face.data[:, dim] = x_min[dim]
             
             with torch.no_grad():
-                # Gradient descent on x (minimize V)
-                span = x_max - x_min
-                scaled_step = pgd_step_size * span
-                x.data = x - scaled_step * torch.sign(x.grad)
-                
-                # Clamp to box
-                x.data = torch.clamp(x.data, min=x_min, max=x_max)
-                
-                # Keep on boundary (optional: could relax this)
-                x.grad.zero_()
-        
-        with torch.no_grad():
-            v_final = lyapunov(x).item()
-            min_v_values.append(v_final)
-            x_solutions.append(x.clone())
-    
-    # Step 3: Find minimum V on boundary
+                v_final = lyapunov(x_face)
+                min_v_values.append(v_final.min().item())
+                x_solutions.append(x_face.clone())
+
     min_v_val = min(min_v_values)
-    rho = gamma * max(min_v_val, 1e-4)  # Ensure rho > 0
+    rho = gamma * max(min_v_val, 1e-4)
     
     if verbose:
-        print(f"[ROA] Boundary V values: min={min_v_val:.6f}, max={max(min_v_values):.6f}")
         print(f"[ROA] Computed ρ = {gamma} * {min_v_val:.6f} = {rho:.6f}")
-    
-    x_solutions_tensor = torch.cat([x.squeeze(0) for x in x_solutions], dim=0)
+        
+    x_solutions_tensor = torch.cat(x_solutions, dim=0)
     return rho, x_solutions_tensor
 
 

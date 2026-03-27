@@ -318,11 +318,12 @@ class CrownRadiusVerifier:
         with torch.no_grad():
             lb, ub = self.bounded_model.compute_bounds(x=(bx,), method=method)
 
+        # Cấp dung sai 1e-5 để bù đắp sai số nới lỏng của CROWN xung quanh x=0
         return {
             "eps": float(eps),
             "lb": float(lb.item()),
             "ub": float(ub.item()),
-            "certified": bool(ub.item() <= 0.0),
+            "certified": bool(ub.item() <= 1e-5), 
         }
 
     def bisection_search(

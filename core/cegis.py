@@ -147,19 +147,19 @@ class PGDAttacker:
             V_curr = self.lyapunov(x)
             V_next = self.lyapunov(x_next)
 
-            # Đồng bộ với loss Lyapunov của learner: maximize V_next - (1 - alpha) * V_curr
+            # Mục tiêu: Cực đại hóa violation
             violation = V_next - (1.0 - alpha_lyap) * V_curr
-            loss_attack = -torch.sum(violation)
-
-            loss_attack.backward()
+            
+            # SỬA LỖI TẠI ĐÂY: Dùng autograd để lấy trực tiếp đạo hàm của violation theo x.
+            # Tránh dùng .backward() để không làm bẩn/tích lũy gradient của các mạng nơ-ron.
+            grad_x = torch.autograd.grad(violation.sum(), x)[0]
 
             with torch.no_grad():
-                # TÍNH TOÁN BƯỚC CHÂN TỈ LỆ VỚI KHÔNG GIAN
                 span = x_max - x_min
-                # step_size (vd: 0.01) giờ là 1% của toàn bộ dải vật lý
                 scaled_step = span * self.step_size 
                 
-                x_adv = x + scaled_step * x.grad.sign()
+                # Đi THEO hướng gradient (Cộng) để LEO LÊN ĐỈNH (Gradient Ascent)
+                x_adv = x + scaled_step * grad_x.sign()
                 
                 if self.noise_scale > 0.0:
                     anneal = 1.0 - (step_idx / max(1, self.num_steps - 1))

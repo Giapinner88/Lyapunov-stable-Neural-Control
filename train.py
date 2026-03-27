@@ -68,8 +68,8 @@ def apply_cartpole_strong_profile(config) -> None:
     if config.system.name != "cartpole":
         return
     # Stronger profile to improve certified region for cartpole.
-    config.loop.learning_rate = 5e-4
-    config.loop.learner_updates = 4
+    config.loop.learning_rate = 5e-5
+    config.loop.learner_updates = 1
     config.loop.batch_size = 1024
     config.loop.train_batch_size = 1024
     config.loop.attack_seed_size = 512
@@ -85,8 +85,8 @@ def apply_cartpole_paper_profile(config) -> None:
     if config.system.name != "cartpole":
         return
     # Aggressive profile aimed at getting closer to paper-level behavior.
-    config.loop.learning_rate = 3e-4
-    config.loop.learner_updates = 5
+    config.loop.learning_rate = 1e-4
+    config.loop.learner_updates = 2
     config.loop.batch_size = 1024
     config.loop.train_batch_size = 1024
     config.loop.attack_seed_size = 640
@@ -110,37 +110,43 @@ def apply_cartpole_paper_profile(config) -> None:
 def apply_cartpole_final_mission_profile(config) -> None:
     if config.system.name != "cartpole":
         return
-    # Final aggressive profile for pushing closest to paper-level results.
-    config.loop.learning_rate = 2e-4
-    config.loop.learner_updates = 6
-    config.loop.batch_size = 1280
-    config.loop.train_batch_size = 1280
+    # Profile được tinh chỉnh lại dựa trên nguyên lý cân bằng Min-Max
+    config.loop.learning_rate = 1e-4          # GIẢM: Tránh nhảy cóc phá vỡ hàm Lyapunov
+    config.loop.learner_updates = 2           # GIẢM: Tránh overfit vào tập phản ví dụ cục bộ
+    config.loop.batch_size = 1024
+    config.loop.train_batch_size = 1024
     config.loop.attack_seed_size = 768
-    config.loop.sweep_every = 10
-    config.loop.checkpoint_every = 10
-    config.loop.lqr_anchor_radius = (0.08, 0.08, 0.08, 0.08)
-    config.curriculum.start_scale = 0.35
+    config.loop.sweep_every = 20              # TĂNG: Quét ít lại để tiết kiệm thời gian, tập trung train
+    config.loop.checkpoint_every = 20
+    
+    # Cấu hình Mỏ neo
+    config.loop.lqr_anchor_radius = (0.05, 0.05, 0.05, 0.05) # Giữ chặt vùng an toàn tuyến tính
+    
+    # Giáo trình (Curriculum)
+    config.curriculum.start_scale = 0.2       # Bắt đầu từ vùng rất nhỏ để build base vững
     config.curriculum.end_scale = 1.0
 
-    config.attacker.num_steps = 160
+    # Attacker: Cần mạnh để ép Learner, nhưng không nên chạy quá lâu (160 steps là overkill)
+    config.attacker.num_steps = 80            
     config.attacker.num_restarts = 10
-    config.attacker.step_size = 0.012
+    config.attacker.step_size = 0.02          # Bước dài hơn một chút để nhảy khỏi local minima
 
+    # Bank và Loss
     config.cegis.bank_capacity = 800000
     config.cegis.bank_mode = "reservoir"
-    config.cegis.replay_new_ratio = 0.18
-    config.cegis.violation_margin = 2e-4
-    config.cegis.local_box_radius = 0.15
+    config.cegis.replay_new_ratio = 0.25      # TĂNG: Ưu tiên xử lý lỗi mới tìm thấy
+    config.cegis.violation_margin = 1e-4      # Hạ margin để Learner không bị ép quá đáng
+    config.cegis.local_box_radius = 0.1
     config.cegis.local_box_samples = 2048
-    config.cegis.local_box_weight = 0.70
-    config.cegis.equilibrium_weight = 0.15
+    config.cegis.local_box_weight = 1.0       # TĂNG: Đề cao tính ổn định tuyệt đối quanh điểm gốc
+    config.cegis.equilibrium_weight = 0.05    # GIẢM: Đừng phạt quá nặng sai số nhỏ tại gốc
 
 
 def train(
     system="cartpole",
     pretrain_epochs=150,
     cegis_epochs=350,
-    alpha_lyap=0.08,
+    alpha_lyap=0.01,
     resume=False,
     skip_pretrain_if_resumed=True,
     strong_profile=False,

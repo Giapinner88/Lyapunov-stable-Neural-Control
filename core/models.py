@@ -38,15 +38,18 @@ class NeuralController(nn.Module):
         self.net = nn.Sequential(*layers)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        # Ép x vật lý về x_norm nằm trong khoảng [-1, 1] để Tanh không bị bão hòa
         x_norm = x / self.state_limits
-        u_raw = self.net(x_norm)
 
-        # Cưỡng bức điều kiện cân bằng chính xác: u(0) = 0.
         zero_norm = self.origin.unsqueeze(0) / self.state_limits
+        u_raw = self.net(x_norm)
         u_origin = self.net(zero_norm).squeeze(0)
+        unclipped_output = (u_raw - u_origin) * self.u_bound
 
-        return (u_raw - u_origin) * self.u_bound
+        # THAY THẾ CHO: torch.clamp(unclipped_output, -self.u_bound, self.u_bound)
+        u_bound_tensor = torch.tensor(self.u_bound, device=x.device)
+        f1 = torch.nn.functional.relu(unclipped_output - (-u_bound_tensor)) + (-u_bound_tensor)
+        u_out = -(torch.nn.functional.relu(u_bound_tensor - f1) - u_bound_tensor)
+        return u_out
 
 
 # ==========================================
@@ -82,32 +85,28 @@ class NeuralLyapunov(nn.Module):
         self.phi_V = nn.Sequential(*layers)
         
         # FIX: Khởi tạo R lớn hơn (từ 0.1 → 0.5) để P = R^T*R kích thước hợp lý
-        self.R = nn.Parameter(torch.randn(nx, nx) * 0.5)
+        self.R = nn.Parameter(torch.randn(nx, nx) * 0.1)
         self.eps = eps
         
         self.register_buffer("eye", torch.eye(nx))
         self.register_buffer("origin", torch.zeros(nx))
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        # 1. Tính phi_0
         zero_norm = self.origin.unsqueeze(0) / self.state_limits
         with torch.no_grad():
             phi_0 = self.phi_V(zero_norm).squeeze(0)
 
-        # 2. Tính ||phi_V(x) - phi_V(0)||_1 trên x đã chuẩn hóa
         x_norm = x / self.state_limits
         phi_x = self.phi_V(x_norm)
-        term1 = torch.sum(torch.abs(phi_x - phi_0), dim=1, keepdim=True)
         
-        # 3. Tính x^T * P * x 
-        # (LƯU Ý: Tuyệt đối dùng x GỐC ở đây để bảo toàn kích thước vật lý của mỏ neo LQR)
+        # Use relu(x) + relu(-x) instead of torch.abs(x) since the verification code does relu splitting.
+        diff = phi_x - phi_0
+        term1 = torch.sum(torch.nn.functional.relu(diff) + torch.nn.functional.relu(-diff), dim=1, keepdim=True)
+        
         P = self.eps * self.eye + torch.matmul(self.R.T, self.R)
         Px = torch.matmul(x, P)
         term2 = torch.sum(Px * x, dim=1, keepdim=True)
         
-        # 4. Hàm Lyapunov không dùng offset cứng:
-        # term1 >= 0 và term2 > 0 với mọi x != 0 vì P = eps*I + R^T R là SPD (eps > 0).
-        # Do đó V(0) = 0 và V(x) > 0 với mọi x != 0.
         V = term1 + term2
         return V
 

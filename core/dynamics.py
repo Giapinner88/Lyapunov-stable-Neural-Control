@@ -153,30 +153,41 @@ class CartpoleDynamics(BaseDynamics):
         return x + self.dt * x_dot
 
     def get_lqr_baseline(self):
-        device = self.masscart.device
+        device = self.masscart.device if hasattr(self, 'masscart') else self.m.device
         x0 = torch.zeros((1, self.nx), dtype=torch.float32, device=device, requires_grad=True)
         u0 = torch.zeros((1, self.nu), dtype=torch.float32, device=device, requires_grad=True)
 
         f = self.continuous_dynamics(x0, u0)
 
-        A_rows = []
-        B_rows = []
+        A_rows, B_rows = [], []
         for i in range(self.nx):
-            grad_x, grad_u = torch.autograd.grad(
-                f[0, i],
-                [x0, u0],
-                retain_graph=True,
-                allow_unused=False,
-            )
+            grad_x, grad_u = torch.autograd.grad(f[0, i], [x0, u0], retain_graph=True)
             A_rows.append(grad_x[0].detach().cpu().numpy())
             B_rows.append(grad_u[0].detach().cpu().numpy())
 
-        A = np.stack(A_rows, axis=0)
-        B = np.stack(B_rows, axis=0)
+        A_c = np.stack(A_rows, axis=0)
+        B_c = np.stack(B_rows, axis=0)
 
+        # ---------------------------------------------------------
+        # CHUYỂN ĐỔI SANG KHÔNG GIAN RỜI RẠC (EULER DISCRETIZATION)
+        # x_{k+1} = x_k + dt * (A_c * x_k + B_c * u_k)
+        #         = (I + A_c * dt) * x_k + (B_c * dt) * u_k
+        # ---------------------------------------------------------
+        I = np.eye(self.nx)
+        A_d = I + A_c * self.dt
+        B_d = B_c * self.dt
+
+        # Trọng số Q, R (CartPole ví dụ)
         Q = np.diag([5.0, 1.0, 20.0, 2.0])
         R = np.array([[0.1]])
 
-        S = la.solve_continuous_are(A, B, Q, R)
-        K = np.linalg.solve(R, B.T @ S)
+        # Giải phương trình Riccati Rời rạc (DARE)
+        S = la.solve_discrete_are(A_d, B_d, Q, R)
+        
+        # Ma trận Gain cho hệ rời rạc: K = (R + B_d^T S B_d)^-1 B_d^T S A_d
+        # scipy linalg có thể tính tự động, nhưng tốt nhất nên tính tay hoặc dùng hàm K của scipy.
+        # Lưu ý: la.solve_discrete_are chỉ trả về S (P trong tài liệu chuẩn).
+        temp = np.linalg.inv(R + B_d.T @ S @ B_d)
+        K = temp @ (B_d.T @ S @ A_d)
+
         return torch.tensor(K, dtype=torch.float32), torch.tensor(S, dtype=torch.float32)

@@ -132,7 +132,7 @@ class LyapunovTrainer:
 
             u_nn = self.controller(x_small)
             u_lqr = -torch.matmul(x_small, self.K.T)
-            u_lqr = torch.clamp(u_lqr, min=-2.0, max=2.0)
+            u_lqr = torch.clamp(u_lqr, min=-self.controller.u_bound, max=self.controller.u_bound)
             loss_u = F.mse_loss(u_nn, u_lqr)
 
             V_nn = self.lyapunov(x_small)
