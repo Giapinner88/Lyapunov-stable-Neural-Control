@@ -92,8 +92,7 @@ python evaluate_cartpole.py --n-tests 100 --output-dir reports/evaluation_result
 ## Pendulum Track (kept)
 
 - Phase portrait: [evaluate_pendulum.py](evaluate_pendulum.py)
-- Diagnostic scripts: [diagnostic.py](diagnostic.py), [test_verifier.py](test_verifier.py)
-- Comparison script: [compare_methods.py](compare_methods.py)
+- Legacy diagnostic/comparison scripts were removed during repository cleanup.
 
 ## Documentation
 

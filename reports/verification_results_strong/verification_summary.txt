@@ -1,9 +1,0 @@
-============================================================
-CartPole Lyapunov-Stable Controller Verification
-============================================================
-
-Empirical ρ: 0.000586
-Verified ρ:  0.001170
-ROA Ratio in Box: 0.00%
-Estimated ROA Volume: 0.0000
-Box Limits: x ∈ [[-1.0, -1.0, -1.0, -1.0], [1.0, 1.0, 1.0, 1.0]]

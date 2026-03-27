@@ -68,17 +68,16 @@ python evaluate_cartpole.py \
 ### 5.1 Ve phase portrait
 
 ```bash
-python evaluate.py
+python evaluate_pendulum.py
 ```
 
 Anh se duoc luu tai:
 - reports/pendulum_phase_portrait.png
 
-### 5.2 So sanh baseline
+### 5.2 Ghi chu
 
-```bash
-python compare_methods.py --output reports/comparison_report.md
-```
+- Cac script so sanh/diagnostic cu da duoc loai bo trong qua trinh don dep repo.
+- Neu can benchmark lai, uu tien dung verify.py + evaluate_cartpole.py + compare_roa_regions.py.
 
 Checkpoint Pendulum mac dinh:
 - checkpoints/pendulum/pendulum_controller.pth

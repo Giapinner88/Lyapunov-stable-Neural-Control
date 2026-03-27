@@ -211,7 +211,7 @@ Xu ly:
 - alpha_lyap (train) va rho (verify) can nhat quan theo muc tieu so sanh.
 
 3. Dong nhat entry points:
-- train.py, evaluate.py, test_verifier.py, core/export.py phai trung constructor nx/nu/hidden/u_bound.
+- train.py, evaluate_cartpole.py, verify.py, core/export.py phai trung constructor nx/nu/hidden/u_bound.
 
 4. Tuong thich checkpoint:
 - Moi thay doi shape buffer/param can co lop backward compatibility hoac retrain.
