@@ -1,5 +1,54 @@
 # 📊 PROJECT LOG - Lyapunov-stable-Neural-Control
 
+## 🆕 UPDATE HÔM NAY: Phase-Portrait Audit + ROA Logging Fix (2026-03-27)
+
+### 1) Kết luận chính sau khi kiểm chứng đồ thị pha
+
+- Nhận định của user là đúng: ROA thực nghiệm không thể "gần bằng 0" như cách đọc từ một số chỉ số verify cũ.
+- Vấn đề nằm ở độ bảo thủ của chứng nhận Lyapunov + cách đo trong hộp 4D, không phản ánh trực giác trên lát cắt pha 2D.
+
+### 2) Bằng chứng định lượng mới
+
+- Empirical basin trên lát cắt pha (x=0, x_dot=0), rollout 250 bước, ngưỡng hội tụ ||(theta, theta_dot)|| < 0.12:
+  - Slice [-1, 1] x [-1, 1]: 49.54% (5054/10201)
+  - Slice [-2.2, 2.2] x [-3.5, 3.5]: 20.71% (2113/10201)
+
+- So sánh vùng ROA từ script compare (dense-grid SMT-like trên lát cắt 2D):
+  - Neural (final): rho ~ 0.00224, verified_area_pct ~ 0.0270
+  - SOS/SDP proxy (quadratic): verified_area_pct ~ 0.7909
+
+### 3) Artifacts đã tạo/cập nhật
+
+- Phase portrait mới: `reports/cartpole_phase_portrait_detailed_latest.png`
+- RoA comparison:
+  - `reports/roa_method_comparison/roa_method_regions.png`
+  - `reports/roa_method_comparison/roa_expansion_checkpoints.png`
+  - `reports/roa_method_comparison/verified_area_vs_rho.png`
+  - `reports/roa_method_comparison/roa_comparison_summary.json`
+
+### 4) Fix pipeline logging/analysis
+
+- `verify.py`:
+  - Sửa format để tránh hiểu nhầm "0 tuyệt đối" khi Monte Carlo chưa bắt được mẫu.
+  - In thêm raw values:
+    - `ROA Ratio Raw`
+    - `Estimated ROA Volume Raw`
+  - Nếu 0 hit, hiển thị dạng giới hạn phát hiện: `<... (0/N hits)>`.
+
+- `analyze_training_results.py`:
+  - Không còn fail cứng khi thiếu train log.
+  - Tự fallback parse từ `evaluation_results/` và `verification_results/`.
+  - Parse được cả định dạng raw mới cho số rất nhỏ.
+
+### 5) Hành động tiếp theo đề xuất
+
+- Bổ sung chỉ số empirical-basin song song với certified ROA trong báo cáo verify để tránh kết luận sai.
+- Nâng sampling strategy (importance/adaptive sampling quanh biên V=rho) để giảm under-estimation.
+- Tách rõ 3 thước đo trong report:
+  1) empirical basin on slice,
+  2) verified area on slice,
+  3) certified volume ratio in full 4D box.
+
 ## 🆕 UPDATE HÔM NAY: Final-Mission Prep + Verify Encoding Fix (2026-03-26)
 
 ### 1) Kết quả run strong CartPole
