@@ -67,6 +67,10 @@ class LyapunovTrainer:
             local_box_samples=self.config.cegis.local_box_samples,
             local_box_weight=self.config.cegis.local_box_weight,
             equilibrium_weight=self.config.cegis.equilibrium_weight,
+            local_sampling_mode=self.config.cegis.local_sampling_mode,
+            local_levelset_c=self.config.cegis.local_levelset_c,
+            local_levelset_quantile=self.config.cegis.local_levelset_quantile,
+            local_levelset_oversample_factor=self.config.cegis.local_levelset_oversample_factor,
             box_lo=self.x_min,
             box_up=self.x_max,
         )
@@ -106,7 +110,7 @@ class LyapunovTrainer:
         if self.system_name == "pendulum":
             return PendulumDynamics()
         if self.system_name == "cartpole":
-            return CartpoleDynamics()
+            return CartpoleDynamics(max_force=self.config.model.u_bound, position_integration="midpoint")
         raise ValueError(f"Unsupported system: {self.system_name}")
 
     def _sample_near_origin(self, batch_size: int, radius: tuple[float, ...]) -> torch.Tensor:

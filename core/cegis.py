@@ -231,6 +231,10 @@ class CEGISLoop:
         local_box_samples: int = 256,
         local_box_weight: float = 0.2,
         equilibrium_weight: float = 0.1,
+        local_sampling_mode: str = "levelset",
+        local_levelset_c: float | None = None,
+        local_levelset_quantile: float = 0.6,
+        local_levelset_oversample_factor: int = 6,
         box_lo: torch.Tensor | None = None,
         box_up: torch.Tensor | None = None,
         loss_weights: tuple[float, float, float] = (1.0, 1.0, 1.0),
@@ -247,9 +251,47 @@ class CEGISLoop:
         self.local_box_samples = int(local_box_samples)
         self.local_box_weight = float(local_box_weight)
         self.equilibrium_weight = float(equilibrium_weight)
+        self.local_sampling_mode = str(local_sampling_mode).lower()
+        self.local_levelset_c = None if local_levelset_c is None else float(local_levelset_c)
+        self.local_levelset_quantile = float(local_levelset_quantile)
+        self.local_levelset_oversample_factor = max(1, int(local_levelset_oversample_factor))
         self.box_lo = None if box_lo is None else torch.as_tensor(box_lo, dtype=torch.float32).view(1, -1)
         self.box_up = None if box_up is None else torch.as_tensor(box_up, dtype=torch.float32).view(1, -1)
         self.loss_weights = tuple(float(w) for w in loss_weights)
+
+    def _sample_local_points(self, x_ref: torch.Tensor) -> torch.Tensor:
+        device = x_ref.device
+        dtype = x_ref.dtype
+
+        def _sample_box(n: int) -> torch.Tensor:
+            return (torch.rand((n, self.dynamics.nx), device=device, dtype=dtype) * 2.0 - 1.0) * self.local_box_radius
+
+        if self.local_sampling_mode != "levelset":
+            return _sample_box(self.local_box_samples)
+
+        with torch.no_grad():
+            if self.local_levelset_c is not None:
+                c_level = float(self.local_levelset_c)
+            else:
+                q = min(max(self.local_levelset_quantile, 0.0), 1.0)
+                v_ref = self.lyapunov(x_ref).view(-1)
+                c_level = float(torch.quantile(v_ref, q).item())
+
+            n_candidates = self.local_box_samples * self.local_levelset_oversample_factor
+            x_candidates = _sample_box(n_candidates)
+            v_candidates = self.lyapunov(x_candidates)
+            inside_idx = torch.nonzero((v_candidates <= c_level).squeeze(1), as_tuple=False).squeeze(1)
+
+            if inside_idx.numel() <= 0:
+                return _sample_box(self.local_box_samples)
+
+            if inside_idx.numel() >= self.local_box_samples:
+                keep = inside_idx[torch.randperm(inside_idx.numel(), device=device)[: self.local_box_samples]]
+                return x_candidates[keep]
+
+            pad_idx = inside_idx[torch.randint(0, inside_idx.numel(), (self.local_box_samples - inside_idx.numel(),), device=device)]
+            keep = torch.cat([inside_idx, pad_idx], dim=0)
+            return x_candidates[keep]
 
     def _build_training_batch(self, x_new_bad: torch.Tensor, batch_size: int) -> torch.Tensor:
         """
@@ -342,7 +384,7 @@ class CEGISLoop:
 
         # --- 1.1 LOSS CỤC BỘ GẦN GỐC (ép RoA lõi chặt hơn) ---
         device = x_samples.device
-        x_local = (torch.rand((self.local_box_samples, self.dynamics.nx), device=device) * 2.0 - 1.0) * self.local_box_radius
+        x_local = self._sample_local_points(x_samples)
         u_local = self.controller(x_local)
         x_next_local = self.dynamics.step(x_local, u_local)
         local_violation = lyapunov_decrease_expression(self.lyapunov, x_next_local, x_local, alpha_lyap)

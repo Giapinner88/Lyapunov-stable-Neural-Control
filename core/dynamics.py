@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import numpy as np
 import scipy.linalg as la
 
@@ -100,6 +101,8 @@ class CartpoleDynamics(BaseDynamics):
         length: float = 1.0,
         dt: float = 0.05,
         damping: float = 0.0,
+        max_force: float = 30.0,
+        position_integration: str = "midpoint",
     ):
         super().__init__(nx=4, nu=1, dt=dt)
         self.register_buffer("gravity", torch.tensor(gravity))
@@ -107,6 +110,11 @@ class CartpoleDynamics(BaseDynamics):
         self.register_buffer("masspole", torch.tensor(masspole))
         self.register_buffer("length", torch.tensor(length))
         self.register_buffer("damping", torch.tensor(damping))
+        self.register_buffer("max_force", torch.tensor(max_force))
+        integration_mode = str(position_integration).lower()
+        if integration_mode not in {"euler", "midpoint", "semi_implicit"}:
+            raise ValueError("position_integration must be one of: euler, midpoint, semi_implicit")
+        self.position_integration = integration_mode
 
     def continuous_dynamics(self, x: torch.Tensor, u: torch.Tensor) -> torch.Tensor:
         cart_pos = x[:, 0:1]
@@ -114,7 +122,11 @@ class CartpoleDynamics(BaseDynamics):
         theta = x[:, 2:3]
         theta_dot = x[:, 3:4]
 
-        force = u[:, 0:1]
+        action = u[:, 0:1]
+        max_force = self.max_force
+        force = action
+        force = (-max_force) + F.relu(force - (-max_force))
+        force = max_force - F.relu(max_force - force)
         sin_theta = torch.sin(theta)
         cos_theta = torch.cos(theta)
 
@@ -136,9 +148,29 @@ class CartpoleDynamics(BaseDynamics):
         return torch.cat([cart_vel, x_ddot, theta_dot, theta_ddot], dim=1)
 
     def step(self, x: torch.Tensor, u: torch.Tensor) -> torch.Tensor:
-        # Keep Euler update to stay close to the baseline implementation in the paper code.
         x_dot = self.continuous_dynamics(x, u)
-        return x + self.dt * x_dot
+        if self.position_integration == "euler":
+            return x + self.dt * x_dot
+
+        cart_pos = x[:, 0:1]
+        cart_vel = x[:, 1:2]
+        theta = x[:, 2:3]
+        theta_dot = x[:, 3:4]
+
+        x_ddot = x_dot[:, 1:2]
+        theta_ddot = x_dot[:, 3:4]
+
+        cart_vel_next = cart_vel + self.dt * x_ddot
+        theta_dot_next = theta_dot + self.dt * theta_ddot
+
+        if self.position_integration == "semi_implicit":
+            cart_pos_next = cart_pos + self.dt * cart_vel_next
+            theta_next = theta + self.dt * theta_dot_next
+        else:
+            cart_pos_next = cart_pos + 0.5 * self.dt * (cart_vel + cart_vel_next)
+            theta_next = theta + 0.5 * self.dt * (theta_dot + theta_dot_next)
+
+        return torch.cat([cart_pos_next, cart_vel_next, theta_next, theta_dot_next], dim=1)
 
     def get_lqr_baseline(self):
         device = self.masscart.device if hasattr(self, 'masscart') else self.m.device

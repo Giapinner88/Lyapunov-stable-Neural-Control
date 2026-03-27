@@ -28,11 +28,11 @@ class NeuralController(nn.Module):
         layers = []
         in_size = nx
         for h in hidden_sizes:
-            layers.append(nn.Linear(in_size, h))
+            layers.append(nn.Linear(in_size, h, bias=False))
             layers.append(nn.Tanh())  
             in_size = h
             
-        layers.append(nn.Linear(in_size, nu))
+        layers.append(nn.Linear(in_size, nu, bias=False))
         layers.append(nn.Tanh()) 
         
         self.net = nn.Sequential(*layers)
@@ -50,6 +50,11 @@ class NeuralController(nn.Module):
         f1 = torch.nn.functional.relu(unclipped_output - (-u_bound_tensor)) + (-u_bound_tensor)
         u_out = -(torch.nn.functional.relu(u_bound_tensor - f1) - u_bound_tensor)
         return u_out
+
+    def load_state_dict(self, state_dict, strict: bool = True):
+        # Backward compatibility: old checkpoints may contain bias tensors.
+        filtered = {k: v for k, v in state_dict.items() if not k.endswith(".bias")}
+        return super().load_state_dict(filtered, strict=strict)
 
 
 # ==========================================
@@ -77,11 +82,11 @@ class NeuralLyapunov(nn.Module):
         layers = []
         in_size = nx
         for h in hidden_sizes:
-            layers.append(nn.Linear(in_size, h))
+            layers.append(nn.Linear(in_size, h, bias=False))
             layers.append(nn.Tanh())
             in_size = h
         
-        layers.append(nn.Linear(in_size, nx)) 
+        layers.append(nn.Linear(in_size, nx, bias=False)) 
         self.phi_V = nn.Sequential(*layers)
         
         # FIX: Khởi tạo R lớn hơn (từ 0.1 → 0.5) để P = R^T*R kích thước hợp lý
@@ -124,6 +129,8 @@ class NeuralLyapunov(nn.Module):
 
     def load_state_dict(self, state_dict, strict: bool = True):
         # Backward compatibility: old checkpoints stored origin as shape [1, nx].
+        # Also drop bias tensors from legacy checkpoints.
+        state_dict = {k: v for k, v in state_dict.items() if not k.endswith(".bias")}
         origin_key = "origin"
         if origin_key in state_dict:
             origin_tensor = state_dict[origin_key]

@@ -37,6 +37,10 @@ class CEGISConfig:
     local_box_samples: int = 512
     local_box_weight: float = 0.50
     equilibrium_weight: float = 0.05
+    local_sampling_mode: str = "levelset"
+    local_levelset_c: float | None = None
+    local_levelset_quantile: float = 0.60
+    local_levelset_oversample_factor: int = 6
 
 
 @dataclass
