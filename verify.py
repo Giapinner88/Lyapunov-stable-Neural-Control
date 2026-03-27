@@ -15,54 +15,9 @@ from typing import Dict
 if __package__ is None or __package__ == "":
     sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from core.dynamics import CartpoleDynamics, PendulumDynamics
-from core.models import NeuralController, NeuralLyapunov
+from core.runtime_utils import box_tensors, choose_device, load_trained_system
 from core.verification import BisectionVerifier, CrownRadiusVerifier, create_cartpole_verification_result
 from core.roa_utils import compute_rho_boundary, estimate_roa_size
-from core.training_config import get_default_config
-
-
-def load_models(
-    controller_path: str,
-    lyapunov_path: str,
-    system_name: str = "cartpole",
-    device: torch.device = torch.device('cpu'),
-):
-    """Load pre-trained controller and Lyapunov function."""
-    
-    # Get configuration
-    config = get_default_config(system_name)
-    
-    # Build dynamics
-    if system_name == "cartpole":
-        dynamics = CartpoleDynamics().to(device)
-    elif system_name == "pendulum":
-        dynamics = PendulumDynamics().to(device)
-    else:
-        raise ValueError(f"Unknown system: {system_name}")
-    
-    # Build models
-    controller = NeuralController(
-        nx=config.model.nx,
-        nu=config.model.nu,
-        u_bound=config.model.u_bound,
-        state_limits=config.model.state_limits,
-    ).to(device)
-    
-    lyapunov = NeuralLyapunov(
-        nx=config.model.nx,
-        state_limits=config.model.state_limits,
-    ).to(device)
-    
-    # Load weights
-    controller.load_state_dict(torch.load(controller_path, map_location=device))
-    lyapunov.load_state_dict(torch.load(lyapunov_path, map_location=device))
-    
-    controller.eval()
-    lyapunov.eval()
-    dynamics.eval()
-    
-    return controller, lyapunov, dynamics, config
 
 
 def verify_cartpole_roa(
@@ -79,20 +34,22 @@ def verify_cartpole_roa(
     Verify CartPole Lyapunov-stable controller and find the maximum certified ROA.
     """
     
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = choose_device("auto")
     if verbose:
         print(f"[Verify] Device: {device}")
-    
-    # Load models
-    controller, lyapunov, dynamics, config = load_models(
+
+    bundle = load_trained_system(
         controller_path,
         lyapunov_path,
         system_name="cartpole",
         device=device,
     )
-    
-    x_min = torch.tensor(config.box.x_min, device=device, dtype=torch.float32)
-    x_max = torch.tensor(config.box.x_max, device=device, dtype=torch.float32)
+    controller = bundle.controller
+    lyapunov = bundle.lyapunov
+    dynamics = bundle.dynamics
+    config = bundle.config
+
+    x_min, x_max = box_tensors(config, device=device, dtype=torch.float32)
     
     if verbose:
         print(f"[Verify] Box constraints: x ∈ [{x_min.tolist()}, {x_max.tolist()}]")

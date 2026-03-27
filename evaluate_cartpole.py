@@ -14,13 +14,12 @@ if __package__ is None or __package__ == "":
     sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from core.dynamics import CartpoleDynamics
-from core.models import NeuralController, NeuralLyapunov
-from core.training_config import get_default_config
+from core.runtime_utils import box_tensors, choose_device, load_trained_system
 
 
 def test_closed_loop_trajectory(
     controller: nn.Module,
-    dynamics: CartpoleDynamics,
+    dynamics: nn.Module,
     x_init: torch.Tensor,
     n_steps: int = 200,
     device: torch.device = torch.device('cpu'),
@@ -53,7 +52,7 @@ def test_closed_loop_trajectory(
 
 def evaluate_convergence(
     controller: nn.Module,
-    dynamics: CartpoleDynamics,
+    dynamics: nn.Module,
     lyapunov: nn.Module,
     x_init: torch.Tensor,
     n_steps: int = 200,
@@ -114,7 +113,7 @@ def evaluate_convergence(
 
 def batch_evaluation(
     controller: nn.Module,
-    dynamics: CartpoleDynamics,
+    dynamics: nn.Module,
     lyapunov: nn.Module,
     x_min: torch.Tensor,
     x_max: torch.Tensor,
@@ -196,32 +195,21 @@ def main():
     
     args = parser.parse_args()
     
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = choose_device("auto")
     print(f"[Evaluate] Device: {device}")
-    
-    # Get configuration
-    config = get_default_config("cartpole")
-    
-    # Build and load models
-    dynamics = CartpoleDynamics().to(device)
-    
-    controller = NeuralController(
-        nx=config.model.nx,
-        nu=config.model.nu,
-        u_bound=config.model.u_bound,
-        state_limits=config.model.state_limits,
-    ).to(device)
-    
-    lyapunov = NeuralLyapunov(
-        nx=config.model.nx,
-        state_limits=config.model.state_limits,
-    ).to(device)
-    
-    controller.load_state_dict(torch.load(args.controller, map_location=device))
-    lyapunov.load_state_dict(torch.load(args.lyapunov, map_location=device))
-    
-    x_min = torch.tensor(config.box.x_min, device=device, dtype=torch.float32)
-    x_max = torch.tensor(config.box.x_max, device=device, dtype=torch.float32)
+
+    bundle = load_trained_system(
+        args.controller,
+        args.lyapunov,
+        system_name="cartpole",
+        device=device,
+    )
+    controller = bundle.controller
+    lyapunov = bundle.lyapunov
+    dynamics = bundle.dynamics
+    config = bundle.config
+
+    x_min, x_max = box_tensors(config, device=device, dtype=torch.float32)
     
     # Run evaluation
     print(f"\n[CartPole Evaluation]")
