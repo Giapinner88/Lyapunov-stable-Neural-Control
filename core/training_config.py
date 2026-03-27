@@ -22,7 +22,7 @@ class ModelConfig:
 
 @dataclass
 class AttackerConfig:
-    num_steps: int = 80
+    num_steps: int = 100
     step_size: float = 0.02
     num_restarts: int = 6
 
@@ -35,8 +35,8 @@ class CEGISConfig:
     violation_margin: float = 5e-4
     local_box_radius: float = 0.20
     local_box_samples: int = 512
-    local_box_weight: float = 0.35
-    equilibrium_weight: float = 0.1
+    local_box_weight: float = 0.50
+    equilibrium_weight: float = 0.05
 
 
 @dataclass
@@ -125,9 +125,9 @@ def cartpole_default_config() -> TrainerConfig:
             x_max=(1.0, 1.0, 1.0, 1.0),
         ),
         loop=TrainingLoopConfig(
-            pretrain_epochs=120,
-            cegis_epochs=320,
-            alpha_lyap=0.05,
+            pretrain_epochs=250,
+            cegis_epochs=400,
+            alpha_lyap=0.01,
             learning_rate=1e-3,
             batch_size=768,
             attack_seed_size=384,

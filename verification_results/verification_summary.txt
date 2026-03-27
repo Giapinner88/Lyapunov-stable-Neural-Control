@@ -2,9 +2,11 @@
 CartPole Lyapunov-Stable Controller Verification
 ============================================================
 
-Empirical rho: 0.001176
-Verified rho:  0.002350
-ROA Ratio in Box: 0.00%
-Estimated ROA Volume: 0.0000
+Empirical rho: 0.001378
+Verified rho:  0.002749
+ROA Ratio in Box: <0.010000% (0/10000 hits)
+ROA Ratio Raw: 0.00000000e+00
+Estimated ROA Volume: <0.001600
+Estimated ROA Volume Raw: 0.00000000e+00
 Box Limits: x in [[-1.0, -1.0, -1.0, -1.0], [1.0, 1.0, 1.0, 1.0]]
 CROWN Local Certified Radius (L_inf): 0.000000 (method=CROWN)

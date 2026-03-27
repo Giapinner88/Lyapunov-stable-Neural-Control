@@ -71,17 +71,20 @@ def _latest_file(paths: list[Path]) -> Optional[Path]:
 
 
 def find_latest_train_log(repo_root: Path) -> Optional[Path]:
-    candidates = sorted((repo_root / "reports").glob("cartpole_*.log"))
+    candidates = sorted((repo_root / "reports").glob("*.log"))
+    candidates += sorted(repo_root.glob("*.log"))
     return _latest_file(candidates)
 
 
 def find_latest_eval_summary(repo_root: Path) -> Optional[Path]:
     candidates = sorted((repo_root / "reports").glob("**/eval_summary.txt"))
+    candidates += sorted((repo_root / "evaluation_results").glob("**/eval_summary.txt"))
     return _latest_file(candidates)
 
 
 def find_latest_verify_summary(repo_root: Path) -> Optional[Path]:
     candidates = sorted((repo_root / "reports").glob("**/verification_summary.txt"))
+    candidates += sorted((repo_root / "verification_results").glob("**/verification_summary.txt"))
     return _latest_file(candidates)
 
 
@@ -122,10 +125,12 @@ def _pick_summary_for_run(log_path: Path, candidates: list[Path], window_hours: 
 def find_latest_run_bundle(repo_root: Path) -> tuple[Optional[Path], Optional[Path], Optional[Path]]:
     train_log = find_latest_train_log(repo_root)
     if train_log is None:
-        return None, None, None
+        return None, find_latest_eval_summary(repo_root), find_latest_verify_summary(repo_root)
 
     eval_candidates = sorted((repo_root / "reports").glob("**/eval_summary.txt"))
     verify_candidates = sorted((repo_root / "reports").glob("**/verification_summary.txt"))
+    eval_candidates += sorted((repo_root / "evaluation_results").glob("**/eval_summary.txt"))
+    verify_candidates += sorted((repo_root / "verification_results").glob("**/verification_summary.txt"))
 
     eval_summary = _pick_summary_for_run(train_log, eval_candidates)
     verify_summary = _pick_summary_for_run(train_log, verify_candidates)
@@ -203,10 +208,16 @@ def parse_verify_summary(path: Optional[Path]) -> VerifySummary:
     if m:
         out.verified_rho = float(m.group(1))
 
-    m = re.search(r"ROA Ratio in Box:\s*([0-9.]+)%", txt)
+    m = re.search(r"ROA\s*Ratio\s*Raw:\s*([0-9.eE+-]+)", txt)
     if m:
         out.roa_ratio = float(m.group(1))
+    m = re.search(r"ROA Ratio in Box:\s*([0-9.eE+-]+)%", txt)
+    if m:
+        out.roa_ratio = float(m.group(1)) / 100.0
 
+    m = re.search(r"Estimated\s+ROA\s+Volume\s+Raw:\s*([0-9.eE+-]+)", txt)
+    if m:
+        out.roa_volume = float(m.group(1))
     m = re.search(r"Estimated ROA Volume:\s*([0-9.eE+-]+)", txt)
     if m:
         out.roa_volume = float(m.group(1))
@@ -450,12 +461,20 @@ def main() -> None:
     else:
         train_log, eval_path, verify_path = find_latest_run_bundle(repo_root)
 
-    if train_log is None or not train_log.exists():
-        raise FileNotFoundError("No train log found. Provide --train-log explicitly.")
+    if train_log is not None and not train_log.exists():
+        raise FileNotFoundError(f"Train log path does not exist: {train_log}")
 
-    stats = parse_train_log(train_log)
+    if train_log is None:
+        print("[Analyze] Warning: No train log found; proceeding with eval/verify summaries only.")
+
+    stats = parse_train_log(train_log) if train_log is not None else []
     eval_sum = parse_eval_summary(eval_path)
     verify_sum = parse_verify_summary(verify_path)
+
+    if train_log is None and eval_path is None and verify_path is None:
+        raise FileNotFoundError(
+            "No train/eval/verify artifacts found. Provide --train-log, --eval-summary, or --verify-summary explicitly."
+        )
 
     tag = args.tag or datetime.now().strftime("%Y%m%d_%H%M%S")
     out_dir = Path(args.output_dir) / tag

@@ -13,17 +13,17 @@
       "best_metric": "verified_area_pct"
     },
     "neural": {
-      "rho": 0.0005859665921889246,
+      "rho": 0.0015294714365154504,
       "sublevel_area_pct": 0.011573627560665097,
       "verified_area_pct": 0.007715751707110065
     },
     "sos_sdp_proxy_quadratic": {
-      "rho": 0.04712027683854103,
-      "sublevel_area_pct": 0.5285289919370394,
-      "verified_area_pct": 0.5285289919370394
+      "rho": 0.0902733787894249,
+      "sublevel_area_pct": 0.9914740943636434,
+      "verified_area_pct": 0.9914740943636434
     }
   },
-  "checkpoint_count": 19,
+  "checkpoint_count": 21,
   "grid_size": 161,
   "slice": {
     "fixed": {

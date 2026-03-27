@@ -1,2 +1,5 @@
 run_id,timestamp,system,seed,deterministic,resume,strong_profile,paper_profile,final_mission,pretrain_epochs,cegis_epochs,alpha_lyap,bank_capacity,bank_mode,replay_new_ratio
 cartpole_20260327_120245,2026-03-27T12:02:45,cartpole,766271436,False,False,False,False,False,150,350,0.08,200000,fifo,0.35
+cartpole_20260327_132417,2026-03-27T13:24:17,cartpole,771163445,False,False,False,False,False,250,400,0.01,200000,fifo,0.35
+cartpole_20260327_141545,2026-03-27T14:15:45,cartpole,774251436,False,False,False,False,False,150,350,0.08,200000,fifo,0.35
+cartpole_20260327_141607,2026-03-27T14:16:07,cartpole,774274873,False,False,False,False,False,150,350,0.08,200000,fifo,0.35

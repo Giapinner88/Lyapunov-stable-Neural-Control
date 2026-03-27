@@ -20,6 +20,37 @@ from core.verification import BisectionVerifier, CrownRadiusVerifier, create_car
 from core.roa_utils import compute_rho_boundary, estimate_roa_size
 
 
+def format_ratio_percent(ratio: float) -> str:
+    pct = ratio * 100.0
+    if pct >= 0.01:
+        return f"{pct:.2f}%"
+    if pct >= 1e-6:
+        return f"{pct:.6f}%"
+    return f"{pct:.3e}%"
+
+
+def format_volume(volume: float) -> str:
+    if abs(volume) >= 1e-4:
+        return f"{volume:.6f}"
+    return f"{volume:.3e}"
+
+
+def ratio_display_with_sampling_limit(ratio: float, n_samples: int) -> str:
+    if ratio > 0.0:
+        return format_ratio_percent(ratio)
+    min_detectable_pct = 100.0 / max(1, int(n_samples))
+    return f"<{min_detectable_pct:.6f}% (0/{n_samples} hits)"
+
+
+def volume_display_with_sampling_limit(volume: float, box_volume: float, ratio: float, n_samples: int) -> str:
+    if ratio > 0.0:
+        return format_volume(volume)
+    min_detectable_volume = box_volume / max(1, int(n_samples))
+    if min_detectable_volume >= 1e-4:
+        return f"<{min_detectable_volume:.6f}"
+    return f"<{min_detectable_volume:.3e}"
+
+
 def verify_cartpole_roa(
     controller_path: str,
     lyapunov_path: str,
@@ -97,14 +128,16 @@ def verify_cartpole_roa(
     if verbose:
         print(f"\n[Step 3] Computing final ROA statistics...")
     
+    roa_samples = 10000
     roa_volume, roa_ratio = estimate_roa_size(
         lyapunov,
         rho_certified,
         x_min,
         x_max,
-        n_samples=10000,
+        n_samples=roa_samples,
         device=device,
     )
+    box_volume = torch.prod(x_max - x_min).item()
     
     # Create result
     result = create_cartpole_verification_result(
@@ -149,8 +182,14 @@ def verify_cartpole_roa(
         print(f"\n[Results Summary]")
         print(f"  Empirical ρ: {rho_empirical:.6f}")
         print(f"  Verified ρ:  {rho_certified:.6f}")
-        print(f"  ROA Ratio in Box: {roa_ratio:.2%}")
-        print(f"  Estimated ROA Volume: {roa_volume:.4f}")
+        print(
+            f"  ROA Ratio in Box: {ratio_display_with_sampling_limit(roa_ratio, roa_samples)} "
+            f"(raw={roa_ratio:.8e})"
+        )
+        print(
+            "  Estimated ROA Volume: "
+            f"{volume_display_with_sampling_limit(roa_volume, box_volume, roa_ratio, roa_samples)}"
+        )
         if "crown_local_certified_eps" in result:
             print(f"  CROWN Certified Local Radius (L_inf): {result['crown_local_certified_eps']:.6f}")
         elif "crown_error" in result:
@@ -167,8 +206,13 @@ def verify_cartpole_roa(
         f.write("="*60 + "\n\n")
         f.write(f"Empirical rho: {rho_empirical:.6f}\n")
         f.write(f"Verified rho:  {rho_certified:.6f}\n")
-        f.write(f"ROA Ratio in Box: {roa_ratio:.2%}\n")
-        f.write(f"Estimated ROA Volume: {roa_volume:.4f}\n")
+        f.write(f"ROA Ratio in Box: {ratio_display_with_sampling_limit(roa_ratio, roa_samples)}\n")
+        f.write(f"ROA Ratio Raw: {roa_ratio:.8e}\n")
+        f.write(
+            f"Estimated ROA Volume: "
+            f"{volume_display_with_sampling_limit(roa_volume, box_volume, roa_ratio, roa_samples)}\n"
+        )
+        f.write(f"Estimated ROA Volume Raw: {roa_volume:.8e}\n")
         f.write(f"Box Limits: x in [{x_min.tolist()}, {x_max.tolist()}]\n")
         if "crown_local_certified_eps" in result:
             f.write(

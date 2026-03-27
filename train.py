@@ -153,6 +153,7 @@ def train(
     curriculum_end_scale=None,
     local_box_samples=None,
     local_box_weight=None,
+    equilibrium_weight=None,
     attacker_steps=None,
     attacker_restarts=None,
     seed=None,
@@ -190,6 +191,8 @@ def train(
         config.cegis.local_box_samples = int(local_box_samples)
     if local_box_weight is not None:
         config.cegis.local_box_weight = float(local_box_weight)
+    if equilibrium_weight is not None:
+        config.cegis.equilibrium_weight = float(equilibrium_weight)
     if attacker_steps is not None:
         config.attacker.num_steps = int(attacker_steps)
     if attacker_restarts is not None:
@@ -270,6 +273,7 @@ if __name__ == "__main__":
     parser.add_argument("--curriculum-end-scale", type=float, default=None)
     parser.add_argument("--local-box-samples", type=int, default=None)
     parser.add_argument("--local-box-weight", type=float, default=None)
+    parser.add_argument("--equilibrium-weight", type=float, default=None)
     parser.add_argument("--attacker-steps", type=int, default=None)
     parser.add_argument("--attacker-restarts", type=int, default=None)
     parser.add_argument("--seed", type=int, default=None, help="Random seed for reproducible training")
@@ -297,6 +301,7 @@ if __name__ == "__main__":
         curriculum_end_scale=args.curriculum_end_scale,
         local_box_samples=args.local_box_samples,
         local_box_weight=args.local_box_weight,
+        equilibrium_weight=args.equilibrium_weight,
         attacker_steps=args.attacker_steps,
         attacker_restarts=args.attacker_restarts,
         seed=args.seed,
