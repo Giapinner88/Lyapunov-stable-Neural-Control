@@ -1,12 +1,67 @@
 import argparse
+import csv
+import json
+import random
+from datetime import datetime
 from pathlib import Path
 import sys
+
+import numpy as np
+import torch
 
 if __package__ is None or __package__ == "":
     sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from core.training_config import get_default_config
 from core.trainer import LyapunovTrainer
+
+
+def set_global_seed(seed: int, deterministic: bool = False) -> None:
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(seed)
+        torch.cuda.manual_seed_all(seed)
+    if deterministic:
+        torch.use_deterministic_algorithms(True, warn_only=True)
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
+
+
+def save_seed_registry(record: dict) -> None:
+    reports_dir = Path("reports")
+    reports_dir.mkdir(parents=True, exist_ok=True)
+
+    csv_path = reports_dir / "seed_registry.csv"
+    json_dir = reports_dir / "run_registry"
+    json_dir.mkdir(parents=True, exist_ok=True)
+
+    fieldnames = [
+        "run_id",
+        "timestamp",
+        "system",
+        "seed",
+        "deterministic",
+        "resume",
+        "strong_profile",
+        "paper_profile",
+        "final_mission",
+        "pretrain_epochs",
+        "cegis_epochs",
+        "alpha_lyap",
+        "bank_capacity",
+        "bank_mode",
+        "replay_new_ratio",
+    ]
+    write_header = not csv_path.exists()
+    with csv_path.open("a", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        if write_header:
+            writer.writeheader()
+        writer.writerow({k: record.get(k) for k in fieldnames})
+
+    (json_dir / f"{record['run_id']}.json").write_text(json.dumps(record, indent=2), encoding="utf-8")
 
 
 def apply_cartpole_strong_profile(config) -> None:
@@ -100,7 +155,14 @@ def train(
     local_box_weight=None,
     attacker_steps=None,
     attacker_restarts=None,
+    seed=None,
+    deterministic=False,
 ):
+    if seed is None:
+        seed = int(datetime.now().timestamp() * 1000) % (2**31 - 1)
+    seed = int(seed)
+    set_global_seed(seed, deterministic=bool(deterministic))
+
     config = get_default_config(system)
 
     if strong_profile:
@@ -135,6 +197,8 @@ def train(
 
     print("[Config]", {
         "system": config.system.name,
+        "seed": seed,
+        "deterministic": bool(deterministic),
         "pretrain_epochs": config.loop.pretrain_epochs,
         "cegis_epochs": config.loop.cegis_epochs,
         "alpha_lyap": config.loop.alpha_lyap,
@@ -146,6 +210,27 @@ def train(
         "attacker_restarts": config.attacker.num_restarts,
     })
 
+    run_id = f"{config.system.name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    save_seed_registry(
+        {
+            "run_id": run_id,
+            "timestamp": datetime.now().isoformat(timespec="seconds"),
+            "system": config.system.name,
+            "seed": seed,
+            "deterministic": bool(deterministic),
+            "resume": bool(resume),
+            "strong_profile": bool(strong_profile),
+            "paper_profile": bool(paper_profile),
+            "final_mission": bool(final_mission),
+            "pretrain_epochs": int(config.loop.pretrain_epochs),
+            "cegis_epochs": int(config.loop.cegis_epochs),
+            "alpha_lyap": float(config.loop.alpha_lyap),
+            "bank_capacity": int(config.cegis.bank_capacity),
+            "bank_mode": str(config.cegis.bank_mode),
+            "replay_new_ratio": float(config.cegis.replay_new_ratio),
+        }
+    )
+
     LyapunovTrainer(config).run(
         resume=bool(resume),
         skip_pretrain_if_resumed=bool(skip_pretrain_if_resumed),
@@ -153,7 +238,7 @@ def train(
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Huấn luyện Lyapunov-stable controller")
-    parser.add_argument("--system", type=str, default="pendulum", choices=["pendulum", "cartpole"])
+    parser.add_argument("--system", type=str, default="cartpole", choices=["pendulum", "cartpole"])
     parser.add_argument("--pretrain-epochs", type=int, default=150)
     parser.add_argument("--cegis-epochs", type=int, default=350)
     parser.add_argument("--alpha-lyap", type=float, default=0.08)
@@ -187,6 +272,12 @@ if __name__ == "__main__":
     parser.add_argument("--local-box-weight", type=float, default=None)
     parser.add_argument("--attacker-steps", type=int, default=None)
     parser.add_argument("--attacker-restarts", type=int, default=None)
+    parser.add_argument("--seed", type=int, default=None, help="Random seed for reproducible training")
+    parser.add_argument(
+        "--deterministic",
+        action="store_true",
+        help="Enable deterministic PyTorch mode (may reduce speed)",
+    )
     args = parser.parse_args()
 
     train(
@@ -208,4 +299,6 @@ if __name__ == "__main__":
         local_box_weight=args.local_box_weight,
         attacker_steps=args.attacker_steps,
         attacker_restarts=args.attacker_restarts,
+        seed=args.seed,
+        deterministic=args.deterministic,
     )
