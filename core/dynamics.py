@@ -3,16 +3,6 @@ import torch.nn as nn
 import numpy as np
 import scipy.linalg as la
 
-# ==========================================
-# 1. CORE INTEGRATOR
-# ==========================================
-def rk4_step(continuous_dynamics_fn, x: torch.Tensor, u: torch.Tensor, dt: float) -> torch.Tensor:
-    k1 = continuous_dynamics_fn(x, u)
-    k2 = continuous_dynamics_fn(x + 0.5 * dt * k1, u)
-    k3 = continuous_dynamics_fn(x + 0.5 * dt * k2, u)
-    k4 = continuous_dynamics_fn(x + dt * k3, u)
-    return x + (dt / 6.0) * (k1 + 2 * k2 + 2 * k3 + k4)
-
 
 # ==========================================
 # 2. BASE DYNAMICS (Đã tích hợp nn.Module)
@@ -28,10 +18,8 @@ class BaseDynamics(nn.Module):
         raise NotImplementedError("Phải được ghi đè bởi hệ vật lý cụ thể")
 
     def step(self, x: torch.Tensor, u: torch.Tensor) -> torch.Tensor:
-        return rk4_step(self.continuous_dynamics, x, u, self.dt)
-
-    def rk4_step(self, x: torch.Tensor, u: torch.Tensor) -> torch.Tensor:
-        return self.step(x, u)
+        x_dot = self.continuous_dynamics(x, u)
+        return x + x_dot * self.dt
         
     def get_lqr_baseline(self):
         raise NotImplementedError()

@@ -22,9 +22,9 @@ class CompleteVerifierGraph(nn.Module):
         # 1. Tính V(x) -> Tương đương Y_1
         v_t = self.lyapunov(x)
         
-        # 2. Tính x_next qua RK4
+        # 2. Tính x_next qua Euler step
         u_t = self.controller(x)
-        x_next = self.dynamics.rk4_step(x, u_t)
+        x_next = self.dynamics.step(x, u_t)
         
         # 3. Tính V(x_next)
         v_next = self.lyapunov(x_next)

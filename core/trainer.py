@@ -67,6 +67,8 @@ class LyapunovTrainer:
             local_box_samples=self.config.cegis.local_box_samples,
             local_box_weight=self.config.cegis.local_box_weight,
             equilibrium_weight=self.config.cegis.equilibrium_weight,
+            box_lo=self.x_min,
+            box_up=self.x_max,
         )
 
         self.K, self.S = self.dynamics.get_lqr_baseline()

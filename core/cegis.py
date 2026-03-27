@@ -1,6 +1,14 @@
 import torch
 
 
+def lyapunov_decrease_expression(lyapunov, x_next: torch.Tensor, x: torch.Tensor, alpha_lyap: float) -> torch.Tensor:
+    if hasattr(lyapunov, "algebraic_decrease"):
+        return lyapunov.algebraic_decrease(x_next, x, alpha_lyap)
+    v_curr = lyapunov(x)
+    v_next = lyapunov(x_next)
+    return v_next - (1.0 - alpha_lyap) * v_curr
+
+
 class CounterexampleBank:
     """
     Ngân hàng lưu phản ví dụ x_bad để learner luôn học trên cả lỗi mới lẫn lỗi cũ.
@@ -144,11 +152,8 @@ class PGDAttacker:
             u = self.controller(x)
             x_next = self.dynamics.step(x, u)
 
-            V_curr = self.lyapunov(x)
-            V_next = self.lyapunov(x_next)
-
             # Mục tiêu: Cực đại hóa violation
-            violation = V_next - (1.0 - alpha_lyap) * V_curr
+            violation = lyapunov_decrease_expression(self.lyapunov, x_next, x, alpha_lyap)
             
             # SỬA LỖI TẠI ĐÂY: Dùng autograd để lấy trực tiếp đạo hàm của violation theo x.
             # Tránh dùng .backward() để không làm bẩn/tích lũy gradient của các mạng nơ-ron.
@@ -194,9 +199,7 @@ class PGDAttacker:
             with torch.no_grad():
                 u = self.controller(x_candidate)
                 x_next = self.dynamics.step(x_candidate, u)
-                V_curr = self.lyapunov(x_candidate)
-                V_next = self.lyapunov(x_next)
-                score = V_next - (1.0 - alpha_lyap) * V_curr
+                score = lyapunov_decrease_expression(self.lyapunov, x_next, x_candidate, alpha_lyap)
 
                 if best_score is None:
                     best_score = score
@@ -228,6 +231,9 @@ class CEGISLoop:
         local_box_samples: int = 256,
         local_box_weight: float = 0.2,
         equilibrium_weight: float = 0.1,
+        box_lo: torch.Tensor | None = None,
+        box_up: torch.Tensor | None = None,
+        loss_weights: tuple[float, float, float] = (1.0, 1.0, 1.0),
     ):
         self.dynamics = dynamics
         self.controller = controller
@@ -241,6 +247,9 @@ class CEGISLoop:
         self.local_box_samples = int(local_box_samples)
         self.local_box_weight = float(local_box_weight)
         self.equilibrium_weight = float(equilibrium_weight)
+        self.box_lo = None if box_lo is None else torch.as_tensor(box_lo, dtype=torch.float32).view(1, -1)
+        self.box_up = None if box_up is None else torch.as_tensor(box_up, dtype=torch.float32).view(1, -1)
+        self.loss_weights = tuple(float(w) for w in loss_weights)
 
     def _build_training_batch(self, x_new_bad: torch.Tensor, batch_size: int) -> torch.Tensor:
         """
@@ -294,9 +303,7 @@ class CEGISLoop:
         with torch.no_grad():
             u_debug = self.controller(x_bad)
             x_next_debug = self.dynamics.step(x_bad, u_debug)
-            V_curr_debug = self.lyapunov(x_bad)
-            V_next_debug = self.lyapunov(x_next_debug)
-            violation_debug = V_next_debug - (1.0 - alpha_lyap) * V_curr_debug
+            violation_debug = lyapunov_decrease_expression(self.lyapunov, x_next_debug, x_bad, alpha_lyap)
             max_violation = torch.max(violation_debug).item()
             mean_violation = torch.mean(violation_debug).item()
         
@@ -317,19 +324,28 @@ class CEGISLoop:
         # --- 1. LOSS VI PHẠM TỪ PGD (Mở rộng ranh giới) ---
         u = self.controller(x_samples)
         x_next = self.dynamics.step(x_samples, u)
-        V_curr = self.lyapunov(x_samples)
-        V_next = self.lyapunov(x_next)
-        violation = V_next - (1.0 - alpha_lyap) * V_curr
+        violation = lyapunov_decrease_expression(self.lyapunov, x_next, x_samples, alpha_lyap)
         lyap_decrease_loss = torch.mean(torch.relu(violation + self.violation_margin))
+        new_x = x_next
+
+        # --- 1.0 BOUNDARY PENALTY (ép trạng thái sau bước nằm trong hộp an toàn) ---
+        if self.box_lo is not None and self.box_up is not None and len(self.loss_weights) >= 3:
+            box_lo = self.box_lo.to(device=x_samples.device, dtype=x_samples.dtype)
+            box_up = self.box_up.to(device=x_samples.device, dtype=x_samples.dtype)
+            loss3 = self.loss_weights[2] * (
+                torch.nn.functional.relu(box_lo - new_x).sum(dim=1, keepdim=True)
+                + torch.nn.functional.relu(new_x - box_up).sum(dim=1, keepdim=True)
+            )
+            boundary_penalty_loss = torch.mean(loss3)
+        else:
+            boundary_penalty_loss = torch.zeros((), device=x_samples.device, dtype=x_samples.dtype)
 
         # --- 1.1 LOSS CỤC BỘ GẦN GỐC (ép RoA lõi chặt hơn) ---
         device = x_samples.device
         x_local = (torch.rand((self.local_box_samples, self.dynamics.nx), device=device) * 2.0 - 1.0) * self.local_box_radius
         u_local = self.controller(x_local)
         x_next_local = self.dynamics.step(x_local, u_local)
-        V_curr_local = self.lyapunov(x_local)
-        V_next_local = self.lyapunov(x_next_local)
-        local_violation = V_next_local - (1.0 - alpha_lyap) * V_curr_local
+        local_violation = lyapunov_decrease_expression(self.lyapunov, x_next_local, x_local, alpha_lyap)
         local_decrease_loss = torch.mean(torch.relu(local_violation + self.violation_margin))
 
         # --- 1.2 LOSS ĐIỂM CÂN BẰNG (giữ điều kiện tại gốc) ---
@@ -354,6 +370,7 @@ class CEGISLoop:
         # Gộp loss: diệt vi phạm global + local + giữ cân bằng + mỏ neo LQR
         loss = (
             lyap_decrease_loss
+            + boundary_penalty_loss
             + self.local_box_weight * local_decrease_loss
             + self.equilibrium_weight * equilibrium_loss
             + 0.01 * (loss_u + loss_v)

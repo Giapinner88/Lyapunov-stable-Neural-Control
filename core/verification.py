@@ -41,6 +41,13 @@ class CartpoleVerificationGraph(nn.Module):
         self.lyapunov = lyapunov
         self.dynamics = dynamics
         self.alpha_lyap = alpha_lyap
+
+    def _decrease_expression(self, x_next: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
+        if hasattr(self.lyapunov, "algebraic_decrease"):
+            return self.lyapunov.algebraic_decrease(x_next, x, self.alpha_lyap)
+        v_next = self.lyapunov(x_next)
+        v_curr = self.lyapunov(x)
+        return v_next - (1.0 - self.alpha_lyap) * v_curr
         
     def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
@@ -60,9 +67,7 @@ class CartpoleVerificationGraph(nn.Module):
         x_next = self.dynamics.step(x, u)
         
         # Lyapunov decrease condition
-        v_next = self.lyapunov(x_next)
-        v_curr = self.lyapunov(x)
-        y1 = v_next - (1.0 - self.alpha_lyap) * v_curr
+        y1 = self._decrease_expression(x_next, x)
         
         # Next state is within [-1,1]^4 penalty (just for reference, not used in main verification)
         y2 = torch.zeros_like(y1)
@@ -91,12 +96,17 @@ class CartpoleDecreaseGraph(nn.Module):
         self.dynamics = dynamics
         self.alpha_lyap = alpha_lyap
 
+    def _decrease_expression(self, x_next: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
+        if hasattr(self.lyapunov, "algebraic_decrease"):
+            return self.lyapunov.algebraic_decrease(x_next, x, self.alpha_lyap)
+        v_next = self.lyapunov(x_next)
+        v_curr = self.lyapunov(x)
+        return v_next - (1.0 - self.alpha_lyap) * v_curr
+
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         u = self.controller(x)
         x_next = self.dynamics.step(x, u)
-        v_curr = self.lyapunov(x)
-        v_next = self.lyapunov(x_next)
-        return v_next - (1.0 - self.alpha_lyap) * v_curr
+        return self._decrease_expression(x_next, x)
 
 
 class VerificationCondition:

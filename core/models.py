@@ -110,6 +110,18 @@ class NeuralLyapunov(nn.Module):
         V = term1 + term2
         return V
 
+    def quadratic_matrix(self) -> torch.Tensor:
+        return self.eps * self.eye + torch.matmul(self.R.T, self.R)
+
+    def algebraic_decrease(self, x_next: torch.Tensor, x: torch.Tensor, alpha_lyap: float) -> torch.Tensor:
+        # Cross-term-free form for tighter CROWN bounds:
+        # x_next^T P x_next - (1-alpha) x^T P x
+        scale = 1.0 - alpha_lyap
+        P = self.quadratic_matrix()
+        q_next = torch.sum(torch.matmul(x_next, P) * x_next, dim=1, keepdim=True)
+        q_curr = torch.sum(torch.matmul(x, P) * x, dim=1, keepdim=True)
+        return q_next - scale * q_curr
+
     def load_state_dict(self, state_dict, strict: bool = True):
         # Backward compatibility: old checkpoints stored origin as shape [1, nx].
         origin_key = "origin"
