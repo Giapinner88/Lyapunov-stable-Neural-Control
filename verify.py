@@ -9,6 +9,7 @@ import torch
 import torch.nn as nn
 import argparse
 from pathlib import Path
+import subprocess
 import sys
 from typing import Dict
 
@@ -16,7 +17,12 @@ if __package__ is None or __package__ == "":
     sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from core.runtime_utils import box_tensors, choose_device, load_trained_system
-from core.verification import BisectionVerifier, CrownRadiusVerifier, create_cartpole_verification_result
+from core.verification import (
+    BisectionVerifier,
+    CartpoleLevelsetImplicationGraph,
+    CrownRadiusVerifier,
+    create_cartpole_verification_result,
+)
 from core.roa_utils import compute_rho_boundary, estimate_roa_size
 
 
@@ -51,6 +57,98 @@ def volume_display_with_sampling_limit(volume: float, box_volume: float, ratio: 
     return f"<{min_detectable_volume:.3e}"
 
 
+def build_bab_artifacts(
+    controller: nn.Module,
+    lyapunov: nn.Module,
+    dynamics: nn.Module,
+    alpha_lyap: float,
+    rho: float,
+    implication_m: float,
+    x_min: torch.Tensor,
+    x_max: torch.Tensor,
+    output_dir: Path,
+) -> Dict[str, str]:
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    graph = CartpoleLevelsetImplicationGraph(
+        controller=controller,
+        lyapunov=lyapunov,
+        dynamics=dynamics,
+        alpha_lyap=alpha_lyap,
+        rho=rho,
+        implication_m=implication_m,
+    ).to(torch.device("cpu"))
+    graph.eval()
+
+    onnx_path = output_dir / "cartpole_levelset_implication.onnx"
+    vnnlib_path = output_dir / "cartpole_levelset_implication.vnnlib"
+    yaml_path = output_dir / "cartpole_levelset_implication.yaml"
+
+    dummy_x = torch.zeros(1, dynamics.nx, dtype=torch.float32)
+    torch.onnx.export(
+        graph,
+        dummy_x,
+        str(onnx_path),
+        export_params=True,
+        opset_version=12,
+        do_constant_folding=True,
+        input_names=["X"],
+        output_names=["Y"],
+        dynamic_axes={"X": {0: "batch_size"}, "Y": {0: "batch_size"}},
+    )
+
+    with open(vnnlib_path, "w", encoding="utf-8") as f:
+        for i in range(dynamics.nx):
+            f.write(f"(declare-const X_{i} Real)\n")
+        f.write("(declare-const Y_0 Real)\n\n")
+
+        for i in range(dynamics.nx):
+            f.write(f"(assert (>= X_{i} {float(x_min[i]):.10f}))\n")
+            f.write(f"(assert (<= X_{i} {float(x_max[i]):.10f}))\n")
+
+        # Unsafe set: F_verify(x) >= 0, where
+        # F_verify = DeltaV - M * ReLU(V - rho)
+        # Proving UNSAT means implication holds for all x in the box.
+        f.write("\n(assert (>= Y_0 0.0))\n")
+
+    with open(yaml_path, "w", encoding="utf-8") as f:
+        f.write("model:\n")
+        f.write(f"  onnx_path: {onnx_path.resolve()}\n")
+        f.write("specification:\n")
+        f.write(f"  vnnlib_path: {vnnlib_path.resolve()}\n")
+        f.write("solver:\n")
+        f.write("  batch_size: 1024\n")
+
+    return {
+        "onnx_path": str(onnx_path.resolve()),
+        "vnnlib_path": str(vnnlib_path.resolve()),
+        "yaml_path": str(yaml_path.resolve()),
+    }
+
+
+def run_bab_complete_verifier(config_path: str) -> Dict[str, str | int]:
+    verifier_dir = Path("alpha-beta-CROWN/complete_verifier").resolve()
+    abcrown_path = verifier_dir / "abcrown.py"
+    if not abcrown_path.exists():
+        raise RuntimeError(f"abcrown.py not found at {abcrown_path}")
+
+    cmd = [sys.executable, str(abcrown_path), "--config", config_path]
+    proc = subprocess.run(
+        cmd,
+        cwd=str(verifier_dir),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    return {
+        "command": " ".join(cmd),
+        "returncode": int(proc.returncode),
+        "stdout": proc.stdout,
+        "stderr": proc.stderr,
+    }
+
+
 def verify_cartpole_roa(
     controller_path: str,
     lyapunov_path: str,
@@ -59,6 +157,9 @@ def verify_cartpole_roa(
     run_crown: bool = True,
     crown_eps_max: float = 1.0,
     crown_method: str = "CROWN",
+    run_bab: bool = False,
+    bab_rho: float | None = None,
+    bab_implication_m: float = 100.0,
     verbose: bool = True,
 ) -> Dict:
     """
@@ -177,6 +278,41 @@ def verify_cartpole_roa(
             result["crown_error"] = str(exc)
             if verbose:
                 print(f"[Step 4] Skip CROWN: {exc}")
+
+    # Step 5: Complete verifier (alpha-beta-CROWN) with Branch-and-Bound
+    if run_bab:
+        if verbose:
+            print("\n[Step 5] Running alpha-beta-CROWN complete verifier (BaB)...")
+        try:
+            rho_for_bab = float(rho_certified if bab_rho is None else bab_rho)
+            artifact_dir = Path(output_dir) / "bab_artifacts"
+            artifacts = build_bab_artifacts(
+                controller=controller,
+                lyapunov=lyapunov,
+                dynamics=dynamics,
+                alpha_lyap=alpha_lyap,
+                rho=rho_for_bab,
+                implication_m=float(bab_implication_m),
+                x_min=x_min,
+                x_max=x_max,
+                output_dir=artifact_dir,
+            )
+            bab_run = run_bab_complete_verifier(artifacts["yaml_path"])
+            result["bab_artifacts"] = artifacts
+            result["bab_rho"] = rho_for_bab
+            result["bab_implication_m"] = float(bab_implication_m)
+            result["bab_command"] = bab_run["command"]
+            result["bab_returncode"] = bab_run["returncode"]
+            result["bab_stdout_tail"] = bab_run["stdout"][-4000:]
+            result["bab_stderr_tail"] = bab_run["stderr"][-4000:]
+            if verbose:
+                status = "success" if bab_run["returncode"] == 0 else "failed"
+                print(f"[Step 5] complete_verifier finished with status={status}")
+                print(f"[Step 5] artifacts: {artifacts}")
+        except Exception as exc:
+            result["bab_error"] = str(exc)
+            if verbose:
+                print(f"[Step 5] Skip BaB: {exc}")
     
     if verbose:
         print(f"\n[Results Summary]")
@@ -194,6 +330,11 @@ def verify_cartpole_roa(
             print(f"  CROWN Certified Local Radius (L_inf): {result['crown_local_certified_eps']:.6f}")
         elif "crown_error" in result:
             print(f"  CROWN status: {result['crown_error']}")
+
+        if "bab_returncode" in result:
+            print(f"  BaB return code: {result['bab_returncode']}")
+        elif "bab_error" in result:
+            print(f"  BaB status: {result['bab_error']}")
     
     # Save results
     Path(output_dir).mkdir(exist_ok=True, parents=True)
@@ -221,6 +362,15 @@ def verify_cartpole_roa(
             )
         elif "crown_error" in result:
             f.write(f"CROWN status: {result['crown_error']}\n")
+
+        if "bab_returncode" in result:
+            f.write(f"BaB return code: {result['bab_returncode']}\n")
+            f.write(f"BaB rho: {result.get('bab_rho', 0.0):.6f}\n")
+            f.write(f"BaB implication_m: {result.get('bab_implication_m', 0.0):.6f}\n")
+            if "bab_artifacts" in result:
+                f.write(f"BaB artifacts: {result['bab_artifacts']}\n")
+        elif "bab_error" in result:
+            f.write(f"BaB status: {result['bab_error']}\n")
     
     if verbose:
         print(f"\n[Output] Summary saved to: {summary_path}")
@@ -274,7 +424,24 @@ if __name__ == "__main__":
         choices=["CROWN", "alpha-CROWN"],
         help="Bound propagation method for CROWN local verification",
     )
-    
+    parser.add_argument(
+        "--run-bab",
+        action="store_true",
+        help="Run alpha-beta-CROWN complete verifier with branch-and-bound",
+    )
+    parser.add_argument(
+        "--bab-rho",
+        type=float,
+        default=None,
+        help="Level-set rho for BaB implication spec (default: use certified rho from step 2)",
+    )
+    parser.add_argument(
+        "--bab-implication-m",
+        type=float,
+        default=100.0,
+        help="Big-M coefficient for implication formulation in BaB spec",
+    )
+
     args = parser.parse_args()
     
     result = verify_cartpole_roa(
@@ -285,6 +452,9 @@ if __name__ == "__main__":
         run_crown=not args.skip_crown,
         crown_eps_max=args.crown_eps_max,
         crown_method=args.crown_method,
+        run_bab=args.run_bab,
+        bab_rho=args.bab_rho,
+        bab_implication_m=args.bab_implication_m,
         verbose=True,
     )
     

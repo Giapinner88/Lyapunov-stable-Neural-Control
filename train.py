@@ -250,7 +250,7 @@ if __name__ == "__main__":
     parser.add_argument("--system", type=str, default="cartpole", choices=["pendulum", "cartpole"])
     parser.add_argument("--pretrain-epochs", type=int, default=150)
     parser.add_argument("--cegis-epochs", type=int, default=350)
-    parser.add_argument("--alpha-lyap", type=float, default=0.08)
+    parser.add_argument("--alpha-lyap", type=float, default=0.01)
     parser.add_argument("--resume", action="store_true", help="Resume from existing checkpoints if available")
     parser.add_argument(
         "--no-skip-pretrain",
