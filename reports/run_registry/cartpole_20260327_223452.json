@@ -1,0 +1,17 @@
+{
+  "run_id": "cartpole_20260327_223452",
+  "timestamp": "2026-03-27T22:34:52",
+  "system": "cartpole",
+  "seed": 804198082,
+  "deterministic": false,
+  "resume": false,
+  "strong_profile": false,
+  "paper_profile": false,
+  "final_mission": false,
+  "pretrain_epochs": 150,
+  "cegis_epochs": 350,
+  "alpha_lyap": 0.08,
+  "bank_capacity": 200000,
+  "bank_mode": "fifo",
+  "replay_new_ratio": 0.35
+}

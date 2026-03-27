@@ -109,6 +109,49 @@ class CartpoleDecreaseGraph(nn.Module):
         return self._decrease_expression(x_next, x)
 
 
+class CartpoleLevelsetImplicationGraph(nn.Module):
+    """
+    Single-output implication graph for level-set verification.
+
+    Verifies: V(x) <= rho => DeltaV(x) <= 0
+    by bounding:
+        F_verify(x) = DeltaV(x) - M * ReLU(V(x) - rho)
+    on a large box.
+    """
+
+    def __init__(
+        self,
+        controller: nn.Module,
+        lyapunov: nn.Module,
+        dynamics: nn.Module,
+        alpha_lyap: float = 0.05,
+        rho: float = 0.1,
+        implication_m: float = 100.0,
+    ):
+        super().__init__()
+        self.controller = controller
+        self.lyapunov = lyapunov
+        self.dynamics = dynamics
+        self.alpha_lyap = alpha_lyap
+        self.register_buffer("rho", torch.tensor(float(rho), dtype=torch.float32))
+        self.register_buffer("implication_m", torch.tensor(float(implication_m), dtype=torch.float32))
+
+    def _decrease_expression(self, x_next: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
+        if hasattr(self.lyapunov, "algebraic_decrease"):
+            return self.lyapunov.algebraic_decrease(x_next, x, self.alpha_lyap)
+        v_next = self.lyapunov(x_next)
+        v_curr = self.lyapunov(x)
+        return v_next - (1.0 - self.alpha_lyap) * v_curr
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        u = self.controller(x)
+        x_next = self.dynamics.step(x, u)
+        delta_v = self._decrease_expression(x_next, x)
+        v_curr = self.lyapunov(x)
+        penalty = torch.relu(v_curr - self.rho)
+        return delta_v - self.implication_m * penalty
+
+
 class VerificationCondition:
     """
     Represents the verification condition:
@@ -307,6 +350,11 @@ class CrownRadiusVerifier:
             )
 
         self.device = device
+        self.controller = controller
+        self.lyapunov = lyapunov
+        self.dynamics = dynamics
+        self.alpha_lyap = alpha_lyap
+
         self.graph = CartpoleDecreaseGraph(
             controller=controller,
             lyapunov=lyapunov,
@@ -318,9 +366,42 @@ class CrownRadiusVerifier:
         self.x0 = torch.zeros((1, dynamics.nx), dtype=torch.float32, device=device)
         self.bounded_model = BoundedModule(self.graph, self.x0, bound_opts={"relu": "adaptive"})
 
-    def bound_at_eps(self, eps: float, method: str = "CROWN") -> Dict[str, float]:
+    def _switch_to_implication_graph(self, rho: float, implication_m: float) -> None:
+        self.graph = CartpoleLevelsetImplicationGraph(
+            controller=self.controller,
+            lyapunov=self.lyapunov,
+            dynamics=self.dynamics,
+            alpha_lyap=self.alpha_lyap,
+            rho=rho,
+            implication_m=implication_m,
+        ).to(self.device)
+        self.graph.eval()
+        self.bounded_model = BoundedModule(self.graph, self.x0, bound_opts={"relu": "adaptive"})
+
+    def _switch_to_decrease_graph(self) -> None:
+        self.graph = CartpoleDecreaseGraph(
+            controller=self.controller,
+            lyapunov=self.lyapunov,
+            dynamics=self.dynamics,
+            alpha_lyap=self.alpha_lyap,
+        ).to(self.device)
+        self.graph.eval()
+        self.bounded_model = BoundedModule(self.graph, self.x0, bound_opts={"relu": "adaptive"})
+
+    def bound_at_eps(
+        self,
+        eps: float,
+        method: str = "CROWN",
+        rho: float | None = None,
+        implication_m: float = 100.0,
+    ) -> Dict[str, float]:
         if eps < 0.0:
             raise ValueError("eps must be non-negative")
+
+        if rho is not None:
+            self._switch_to_implication_graph(rho=float(rho), implication_m=float(implication_m))
+        else:
+            self._switch_to_decrease_graph()
 
         ptb = PerturbationLpNorm(norm=torch.inf, eps=float(eps))
         bx = BoundedTensor(self.x0, ptb)
@@ -331,6 +412,7 @@ class CrownRadiusVerifier:
         # Cấp dung sai 1e-5 để bù đắp sai số nới lỏng của CROWN xung quanh x=0
         return {
             "eps": float(eps),
+            "rho": None if rho is None else float(rho),
             "lb": float(lb.item()),
             "ub": float(ub.item()),
             "certified": bool(ub.item() <= 1e-5), 
@@ -342,6 +424,8 @@ class CrownRadiusVerifier:
         eps_max: float = 1.0,
         max_iterations: int = 12,
         method: str = "CROWN",
+        rho: float | None = None,
+        implication_m: float = 100.0,
         verbose: bool = True,
     ) -> Tuple[float, Dict]:
         lo = float(eps_min)
@@ -351,8 +435,8 @@ class CrownRadiusVerifier:
         if verbose:
             print(f"\n[CROWN] Search certified radius in [{lo:.6f}, {hi:.6f}]")
 
-        lo_stats = self.bound_at_eps(lo, method=method)
-        hi_stats = self.bound_at_eps(hi, method=method)
+        lo_stats = self.bound_at_eps(lo, method=method, rho=rho, implication_m=implication_m)
+        hi_stats = self.bound_at_eps(hi, method=method, rho=rho, implication_m=implication_m)
         history.append({"iteration": -1, "stats": lo_stats})
         history.append({"iteration": -2, "stats": hi_stats})
 
@@ -368,7 +452,7 @@ class CrownRadiusVerifier:
 
         for i in range(max_iterations):
             mid = 0.5 * (lo + hi)
-            stats = self.bound_at_eps(mid, method=method)
+            stats = self.bound_at_eps(mid, method=method, rho=rho, implication_m=implication_m)
             history.append({"iteration": i, "stats": stats})
 
             if verbose:
