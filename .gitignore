@@ -1,117 +1,14 @@
-# ===============================
-
-# Python
-
-# ===============================
-
-__pycache__/
-*.py[cod]
-*$py.class
-
-# compiled extensions
-
-*.so
-
-# distribution
-
-build/
-dist/
-*.egg-info/
-.eggs/
-
-# pip logs
-
-pip-log.txt
-pip-delete-this-directory.txt
-
-# ===============================
-
-# Virtual Environment
-
-# ===============================
-
-.venv/
-venv/
-env/
-ENV/
-
-# ===============================
-
-# Jupyter
-
-# ===============================
-
-.ipynb_checkpoints/
-
-# ===============================
-
-# PyTorch / ML
-
-# ===============================
-
-# model checkpoints
-
-checkpoints/
-*.pt
-*.pth
-*.ckpt
-
-# tensorboard
-
-runs/
-logs/
-
-# datasets
-
-data/
-datasets/
-
-# ===============================
-
-# MuJoCo / simulation outputs
-
-# ===============================
-
-videos/
-recordings/
-sim_logs/
-
-# ===============================
-
-# Editor / IDE
-
-# ===============================
-
-.vscode/
-.idea/
-
-# ===============================
-
-# OS files
-
-# ===============================
-
-.DS_Store
-Thumbs.db
-
-# ===============================
-
-# Cache
-
-# ===============================
-
-.cache/
-.pytest_cache/
-.mypy_cache/
-
-# ===============================
-
-# Misc
-
-# ===============================
-
-*.log
-*.tmp
+.ipynb_checkpoints
+*.pyc
+__pycache__
 *.swp
-
-alpha-beta-CROWN/
+wandb/*
+data/*
+*.compiled
+venv/*
+output/*
+models/lyaloss*
+*.egg-info
+verification/specs/bisect*.*
+verification/out*
+/alpha-beta-CROWN
