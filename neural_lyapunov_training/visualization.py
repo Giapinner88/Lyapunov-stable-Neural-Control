@@ -69,9 +69,9 @@ def plot_pendulum_diagnostics(
     upper_limit: torch.Tensor,
     out_dir: str | Path,
     rho_values: Iterable[float] | None = None,
-    grid_points: int = 140,
-    traj_count: int = 24,
-    traj_steps: int = 220,
+    grid_points: int = 200,
+    traj_count: int = 48,
+    traj_steps: int = 400,
     filename: str = "pendulum_diagnostics.png",
 ) -> Path:
     """Render one comprehensive pendulum diagnostics figure.
@@ -141,7 +141,7 @@ def plot_pendulum_diagnostics(
     fig.colorbar(im_dv, ax=ax, fraction=0.047)
 
     ax = axes["PHASE"]
-    step = max(1, grid_points // 28)
+    step = max(1, grid_points // 32)
     x0_1d = x0_ticks.detach().cpu().numpy()[::step]
     x1_1d = x1_ticks.detach().cpu().numpy()[::step]
     flow_0_stream = flow_0[::step, ::step].T
@@ -153,16 +153,18 @@ def plot_pendulum_diagnostics(
         flow_1_stream,
         color=np.hypot(flow_0_stream, flow_1_stream),
         cmap="plasma",
-        density=1.0,
-        linewidth=1.0,
-        arrowsize=0.9,
+        density=1.2,
+        linewidth=1.3,
+        arrowsize=1.5,
     )
+    
+    # Trajectories: sample from ROA boundary and interior for better diagnostics
     x0_init = (torch.rand((traj_count, 2), device=device) - 0.5) * 2.0 * upper_limit
     traj = _simulate_trajectories(derivative_lyaloss, x0_init, steps=traj_steps)
     for i in range(traj.shape[1]):
-        ax.plot(traj[:, i, 0], traj[:, i, 1], color="white", linewidth=0.9, alpha=0.7)
+        ax.plot(traj[:, i, 0], traj[:, i, 1], color="white", linewidth=1.4, alpha=0.85)
     for rho in rho_list:
-        ax.contour(x0_np, x1_np, V, levels=[rho], colors="cyan", linewidths=2.0)
+        ax.contour(x0_np, x1_np, V, levels=[rho], colors="lime", linewidths=3.0)
     ax.set_title("Closed-loop phase portrait + trajectories")
     ax.set_xlabel("theta")
     ax.set_ylabel("theta_dot")
@@ -189,9 +191,9 @@ def plot_cartpole_diagnostics(
     out_dir: str | Path,
     rho_values: Iterable[float] | None = None,
     phase_indices: Sequence[int] = (1, 3),
-    grid_points: int = 120,
-    traj_count: int = 20,
-    traj_steps: int = 220,
+    grid_points: int = 140,
+    traj_count: int = 32,
+    traj_steps: int = 350,
     filename: str = "cartpole_diagnostics.png",
 ) -> Path:
     """Render one comprehensive cartpole diagnostics figure on a 2D phase slice.
@@ -281,7 +283,7 @@ def plot_cartpole_diagnostics(
     fig.colorbar(im_dv, ax=ax, fraction=0.047)
 
     ax = axes["PHASE"]
-    step = max(1, grid_points // 28)
+    step = max(1, grid_points // 32)
     s0_1d = s0.detach().cpu().numpy()[::step]
     s1_1d = s1.detach().cpu().numpy()[::step]
     flow_0_stream = flow_0[::step, ::step].T
@@ -293,9 +295,9 @@ def plot_cartpole_diagnostics(
         flow_1_stream,
         color=np.hypot(flow_0_stream, flow_1_stream),
         cmap="plasma",
-        density=1.0,
-        linewidth=1.0,
-        arrowsize=0.9,
+        density=1.2,
+        linewidth=1.3,
+        arrowsize=1.5,
     )
 
     x0 = torch.zeros((traj_count, nx), device=device, dtype=lower_limit.dtype)
@@ -303,9 +305,9 @@ def plot_cartpole_diagnostics(
     x0[:, idx1] = (torch.rand((traj_count,), device=device) - 0.5) * 2.0 * upper_limit[idx1]
     traj = _simulate_trajectories(derivative_lyaloss, x0, steps=traj_steps)
     for i in range(traj.shape[1]):
-        ax.plot(traj[:, i, idx0], traj[:, i, idx1], color="white", linewidth=0.9, alpha=0.7)
+        ax.plot(traj[:, i, idx0], traj[:, i, idx1], color="white", linewidth=1.4, alpha=0.85)
     for rho in rho_list:
-        ax.contour(s0_np, s1_np, V_2d, levels=[rho], colors="cyan", linewidths=2.0)
+        ax.contour(s0_np, s1_np, V_2d, levels=[rho], colors="lime", linewidths=3.0)
     ax.set_title("Closed-loop phase portrait + trajectories")
     ax.set_xlabel(label0)
     ax.set_ylabel(label1)
