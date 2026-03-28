@@ -1,4 +1,4 @@
-run_dir: ./output/pendulum_output/${now:%Y-%m-%d}/${now:%H-%M-%S}
+run_dir: ./output/pendulum_output/seed_${seed}/${now:%Y-%m-%d}/${now:%H-%M-%S}
 
 wandb_enabled: False 
 wandb_entity: ??? 

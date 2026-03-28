@@ -19,9 +19,22 @@ import neural_lyapunov_training.lyapunov as lyapunov
 import neural_lyapunov_training.controllers as controllers
 import neural_lyapunov_training.dynamical_system as dynamical_system
 import neural_lyapunov_training.pendulum as pendulum
-import neural_lyapunov_training.quadrotor2d as quadrotor2d
-import neural_lyapunov_training.path_tracking as path_tracking
-import neural_lyapunov_training.pvtol as pvtol
+
+# Some distributions of this repo only include pendulum/cartpole pieces.
+try:
+    import neural_lyapunov_training.quadrotor2d as quadrotor2d
+except ModuleNotFoundError:
+    quadrotor2d = None
+
+try:
+    import neural_lyapunov_training.path_tracking as path_tracking
+except ModuleNotFoundError:
+    path_tracking = None
+
+try:
+    import neural_lyapunov_training.pvtol as pvtol
+except ModuleNotFoundError:
+    pvtol = None
 
 from neural_lyapunov_training.controllers import LinearController
 

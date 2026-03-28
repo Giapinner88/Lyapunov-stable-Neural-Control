@@ -26,6 +26,48 @@ We evaluate our training and verification method on several state-feedback and o
 
 # Code
 
+## Quick Operations
+
+The repository is now split by layers:
+
+- Root entrypoints (easy operations): `train.py`, `verify.py`, `export.py`
+- Workflow scripts and model recipes: `examples/`
+- Algorithm core and reusable modules: `neural_lyapunov_training/`
+- Verification configs/specs: `verification/`
+
+For day-to-day usage (pendulum/cartpole), run from repo root:
+
+```bash
+# Train pendulum state-feedback
+python train.py pendulum --variant state
+
+# Train pendulum output-feedback
+python train.py pendulum --variant output
+
+# Train cartpole state-feedback
+python train.py cartpole
+
+# Verify pendulum using default config
+python verify.py pendulum
+
+# Verify with a specific config
+python verify.py pendulum --config pendulum/pendulum_output_feedback_lyapunov_in_levelset.yaml -- --batch_size 131072
+
+# Verify cartpole (requires explicit config)
+python verify.py cartpole --config cartpole/cartpole_state_feedback_lyapunov_in_levelset.yaml
+
+# Export VNNLIB specs (pendulum/cartpole presets)
+python export.py pendulum --rho 672
+python export.py cartpole --rho 0.13
+```
+
+Pass extra arguments to the underlying training/verification scripts after `--`.
+Example:
+
+```bash
+python train.py cartpole -- --max-iter 2 --epochs 1
+```
+
 ## Installation
 
 Create a conda environment and install the dependencies except those for verification:
@@ -59,14 +101,14 @@ cd ../alpha-beta-CROWN/complete_verifier
 
 # Run the following for each of the systems
 python abcrown.py --config $CONFIG_PATH/path_tracking_state_feedback_lyapunov_in_levelset.yaml
-python abcrown.py --config $CONFIG_PATH/pendulum_state_feedback_lyapunov_in_levelset.yaml
-python abcrown.py --config $CONFIG_PATH/pendulum_output_feedback_lyapunov_in_levelset.yaml
+python abcrown.py --config $CONFIG_PATH/pendulum/pendulum_state_feedback_lyapunov_in_levelset.yaml
+python abcrown.py --config $CONFIG_PATH/pendulum/pendulum_output_feedback_lyapunov_in_levelset.yaml
 python abcrown.py --config $CONFIG_PATH/quadrotor2d_state_feedback_lyapunov_in_levelset.yaml
 python abcrown.py --config $CONFIG_PATH/quadrotor2d_output_feedback_lyapunov_in_levelset.yaml
 ```
 
 The verification will output a summary of results. For example, here are the
-results we obtained on Pendulum Output Feedback using `pendulum_output_feedback_lyapunov_in_levelset.yaml`:
+results we obtained on Pendulum Output Feedback using `pendulum/pendulum_output_feedback_lyapunov_in_levelset.yaml`:
 ```
 ############# Summary #############
 Final verified acc: 100.0% (total 8 examples)
@@ -87,8 +129,9 @@ until it fits into the GPU memory.
 ## Training
 
 ```
-python examples/pendulum_state_training.py
-python examples/pendulum_output_training.py
+python examples/pendulum/state_training.py
+python examples/pendulum/output_training.py
+python examples/cartpole/state_training.py
 python examples/path_tracking_state_training.py
 python examples/quadrotor2d_state_training.py
 python examples/quadrotor2d_output_training.py
@@ -96,16 +139,16 @@ python examples/quadrotor2d_output_training.py
 
 All the training files provide an estimate of the sublevel set value $\hat \rho_{\text{max}}$, figures of ROA slices and $V(x_t)$ along simulated trajectories after the training ends.
 
-We use `hydra` to manage all the configurations. Take pendulum state feedback training as an example, it loads the configuration file in `examples/config/pendulum_state_training.yaml` file for all the parameters. To set your specific parameters, we recommend adding the config file in examples/config/user/USERNAME.yaml, and then run the command
+We use `hydra` to manage all the configurations. Take pendulum state feedback training as an example, it loads the configuration file in `examples/config/pendulum/pendulum_state_training.yaml` file for all the parameters. To set your specific parameters, we recommend adding the config file in examples/config/user/USERNAME.yaml, and then run the command
 ```
-python examples/pendulum_state_training.py user=USERNAME
+python examples/pendulum/state_training.py user=USERNAME
 ```
 You can pattern match `examples/config/user/pendulum_state_training_default.yaml` file to set your own `USERNAME.yaml`.
 
 To reproduce the pendulum state traning result in our paper, please use the following command with a non-default config file
 
 ```
-python examples/pendulum_state_training.py --config-name pendulum_state_training_reproduce
+python examples/pendulum/state_training.py --config-name pendulum_state_training_reproduce
 ```
 
 Note that each run will create a directory, specified in `user.run_dir` in the configuration yaml file. The directory will contain the learned model, wandb data, and the configuration file `config.yaml` used for that run, so that you can easily reproduce the result with the saved configuration file.
@@ -155,7 +198,7 @@ cd verification
 python -m neural_lyapunov_training.bisect \
 --lower_limit -12 -12 --upper_limit 12 12 --hole_size 0.001 \
 --init_rho 603.5202 --rho_eps 0.1 \
---config pendulum_state_feedback_lyapunov_in_levelset.yaml \
+--config pendulum/pendulum_state_feedback_lyapunov_in_levelset.yaml \
 --timeout 100
 ```
 
@@ -190,7 +233,7 @@ cd verification
 python -m neural_lyapunov_training.generate_vnnlib \
 --lower_limit -12 -12 --upper_limit 12 12 --hole_size 0.001 \
 --value_levelset 672 \
-specs/pendulum_state_feedback
+specs/pendulum/pendulum_state_feedback
 ```
 
 You can then run verification, as we mentioned in the "Verification" section.

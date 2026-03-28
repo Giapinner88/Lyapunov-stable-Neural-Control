@@ -1,9 +1,21 @@
 import torch
 import sys
+import importlib.util
+from pathlib import Path
 from matplotlib import cm
 import matplotlib.pyplot as plt
 
 device = 'cuda'
+BASELINE_DIR = Path(__file__).resolve().parent
+
+
+def _load_symbol(module_file: Path, symbol_name: str):
+    spec = importlib.util.spec_from_file_location(module_file.stem, module_file)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"Cannot load module from {module_file}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return getattr(module, symbol_name)
 
 if sys.argv[1] == 'pendulum':
     lower_limit = torch.tensor([-12., -12.])
@@ -11,16 +23,16 @@ if sys.argv[1] == 'pendulum':
     rho_ditl = 22.74517822265625
     rho_ours = 25.58
 
-    from pendulum import LyapunovNet
+    LyapunovNet = _load_symbol(BASELINE_DIR / 'pendulum' / 'main.py', 'LyapunovNet')
     V = LyapunovNet().to(device)
-    V.load_state_dict(torch.load('baselines/nlc_discrete/models/pendulum_lyapunov.pth'))
+    V.load_state_dict(torch.load('baselines/nlc_discrete/models/pendulum/pendulum_lyapunov.pth'))
 elif sys.argv[1] == 'path_tracking':
     lower_limit = torch.tensor([-3., -3.])
     upper_limit = torch.tensor([3., 3.])
     rho_ditl = 60.99
     rho_ours = 72.425
 
-    from path_tracking import LyapunovNet
+    LyapunovNet = _load_symbol(BASELINE_DIR / 'path_tracking.py', 'LyapunovNet')
     V = LyapunovNet().to(device)
     V.load_state_dict(torch.load('baselines/nlc_discrete/models/path_tracking_lyapunov.pth'))
 elif sys.argv[1] == 'cartpole':
@@ -29,9 +41,9 @@ elif sys.argv[1] == 'cartpole':
     rho_ditl = 4.40
     rho_ours = 4.915
 
-    from cartpole import LyapunovNet
+    LyapunovNet = _load_symbol(BASELINE_DIR / 'cartpole' / 'main.py', 'LyapunovNet')
     V = LyapunovNet().to(device)
-    V.load_state_dict(torch.load('baselines/nlc_discrete/models/cartpole_lyapunov.pth'))
+    V.load_state_dict(torch.load('baselines/nlc_discrete/models/cartpole/cartpole_lyapunov.pth'))
 else:
     raise NameError(sys.argv[1])
 
