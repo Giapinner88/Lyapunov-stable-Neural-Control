@@ -8,13 +8,12 @@ import numpy as np
 import argparse
 from pathlib import Path
 import sys
-from typing import Tuple, List
+from typing import Tuple
 
 if __package__ is None or __package__ == "":
     sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from core.dynamics import CartpoleDynamics
-from core.runtime_utils import box_tensors, choose_device, load_trained_system
+from neural_lyapunov_training.runtime_utils import box_tensors, choose_device, load_trained_system
 
 
 def test_closed_loop_trajectory(
@@ -57,6 +56,11 @@ def evaluate_convergence(
     x_init: torch.Tensor,
     n_steps: int = 200,
     device: torch.device = torch.device('cpu'),
+    lyap_step_tol: float = 2e-3,
+    lyap_pass_ratio: float = 0.95,
+    min_v_drop_ratio: float = 0.15,
+    final_state_tol: tuple[float, ...] = (0.10, 0.20, 0.15, 0.25),
+    end_window_std_tol: tuple[float, ...] = (0.04, 0.08, 0.05, 0.10),
     verbose: bool = False,
 ) -> dict:
     """
@@ -85,19 +89,37 @@ def evaluate_convergence(
     final_state = trajectory[-1]
     final_distance = np.linalg.norm(final_state)
     
-    # Check Lyapunov is decreasing
-    v_is_decreasing = np.all(np.diff(v_values) <= 1e-3)  # Small tolerance for numerical errors
-    
-    # Check stabilization
-    state_at_end = trajectory[-10:]
-    is_stabilized = np.std(state_at_end) < 0.05
+    dv = np.diff(v_values)
+    v_decrease_ratio = float(np.mean(dv <= lyap_step_tol))
+    v_is_decreasing = v_decrease_ratio >= lyap_pass_ratio
+    v_drop_target = (1.0 - min_v_drop_ratio) * max(float(v_values[0]), 1e-8)
+    v_drop_ok = float(v_values[-1]) <= v_drop_target
+
+    # Stabilization for cartpole should be checked per-state, not by one scalar std over all dims.
+    state_at_end = trajectory[-20:]
+    end_std = np.std(state_at_end, axis=0)
+    final_abs = np.abs(final_state)
+
+    final_state_tol_arr = np.asarray(final_state_tol, dtype=np.float64)
+    end_window_std_tol_arr = np.asarray(end_window_std_tol, dtype=np.float64)
+    if final_state_tol_arr.shape[0] != final_state.shape[0]:
+        raise ValueError("final_state_tol must have same dimension as state")
+    if end_window_std_tol_arr.shape[0] != final_state.shape[0]:
+        raise ValueError("end_window_std_tol must have same dimension as state")
+
+    final_state_ok = bool(np.all(final_abs <= final_state_tol_arr))
+    end_window_stable = bool(np.all(end_std <= end_window_std_tol_arr))
+    is_stabilized = final_state_ok and end_window_stable
+    is_converged = bool(v_is_decreasing and v_drop_ok and is_stabilized)
     
     if verbose:
         print(f"  Initial state: {x_init.cpu().numpy().flatten()}")
         print(f"  Final state: {final_state}")
         print(f"  Final distance (L2): {final_distance:.6f}")
         print(f"  V(x_init): {v_values[0]:.6f}, V(x_final): {v_values[-1]:.6f}")
+        print(f"  V decrease ratio: {v_decrease_ratio:.3f}")
         print(f"  V is decreasing: {v_is_decreasing}")
+        print(f"  V drop target met: {v_drop_ok}")
         print(f"  Stabilized: {is_stabilized}")
     
     return {
@@ -105,10 +127,34 @@ def evaluate_convergence(
         "controls": controls,
         "v_values": v_values,
         "final_distance": final_distance,
+        "v_decrease_ratio": v_decrease_ratio,
         "v_decreasing": v_is_decreasing,
+        "v_drop_ok": v_drop_ok,
+        "is_converged": is_converged,
         "stabilized": is_stabilized,
+        "final_state_ok": final_state_ok,
+        "end_window_stable": end_window_stable,
         "x_final": final_state,
     }
+
+
+def sample_initial_conditions(
+    x_min: torch.Tensor,
+    x_max: torch.Tensor,
+    n_tests: int,
+    device: torch.device,
+    scale: float,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    scale = float(scale)
+    if not (0.0 < scale <= 1.0):
+        raise ValueError("eval scale must be in (0, 1]")
+
+    center = 0.5 * (x_min + x_max)
+    span = (x_max - x_min) * scale
+    lo = center - 0.5 * span
+    hi = center + 0.5 * span
+    x_inits = lo + torch.rand((n_tests, x_min.shape[0]), device=device) * (hi - lo)
+    return x_inits, lo, hi
 
 
 def batch_evaluation(
@@ -118,6 +164,7 @@ def batch_evaluation(
     x_min: torch.Tensor,
     x_max: torch.Tensor,
     n_tests: int = 100,
+    eval_scale: float = 0.4,
     device: torch.device = torch.device('cpu'),
     verbose: bool = False,
 ) -> dict:
@@ -125,14 +172,20 @@ def batch_evaluation(
     Evaluate controller over a batch of random initial conditions.
     """
     
-    # Sample initial conditions
-    x_inits = x_min + torch.rand((n_tests, x_min.shape[0]), device=device) * (x_max - x_min)
+    x_inits, eval_lo, eval_hi = sample_initial_conditions(
+        x_min=x_min,
+        x_max=x_max,
+        n_tests=n_tests,
+        device=device,
+        scale=eval_scale,
+    )
     
     if verbose:
         print(f"\n[Evaluating] {n_tests} random initial conditions...")
     
     convergence_count = 0
     lyap_decrease_count = 0
+    v_drop_count = 0
     stabilize_count = 0
     
     results_list = []
@@ -146,9 +199,11 @@ def batch_evaluation(
         
         if result["v_decreasing"]:
             lyap_decrease_count += 1
+        if result["v_drop_ok"]:
+            v_drop_count += 1
         if result["stabilized"]:
             stabilize_count += 1
-        if result["v_decreasing"] and result["stabilized"]:
+        if result["is_converged"]:
             convergence_count += 1
         
         if verbose and (i + 1) % 20 == 0:
@@ -156,12 +211,18 @@ def batch_evaluation(
     
     return {
         "total_tests": n_tests,
+        "eval_scale": float(eval_scale),
+        "eval_lo": eval_lo.detach().cpu().tolist(),
+        "eval_hi": eval_hi.detach().cpu().tolist(),
         "convergence_count": convergence_count,
         "convergence_rate": convergence_count / n_tests,
         "lyap_decrease_count": lyap_decrease_count,
         "lyap_decrease_rate": lyap_decrease_count / n_tests,
+        "v_drop_count": v_drop_count,
+        "v_drop_rate": v_drop_count / n_tests,
         "stabilize_count": stabilize_count,
         "stabilize_rate": stabilize_count / n_tests,
+        "mean_v_decrease_ratio": float(np.mean([r["v_decrease_ratio"] for r in results_list])) if results_list else 0.0,
         "results": results_list,
     }
 
@@ -185,6 +246,12 @@ def main():
         type=int,
         default=100,
         help="Number of test trajectories",
+    )
+    parser.add_argument(
+        "--eval-scale",
+        type=float,
+        default=0.4,
+        help="Evaluate on centered box scaled from training box (0,1], default 0.4",
     )
     parser.add_argument(
         "--output-dir",
@@ -222,27 +289,37 @@ def main():
         x_min,
         x_max,
         n_tests=args.n_tests,
+        eval_scale=args.eval_scale,
         device=device,
         verbose=True,
     )
     
     # Print summary
     print(f"\n[Summary]")
+    print(f"  Eval scale: {results['eval_scale']:.2f}")
+    print(f"  Eval range: [{results['eval_lo']}, {results['eval_hi']}]")
     print(f"  Convergence rate: {results['convergence_rate']:.2%}")
     print(f"  Lyapunov decrease rate: {results['lyap_decrease_rate']:.2%}")
+    print(f"  Lyapunov drop rate: {results['v_drop_rate']:.2%}")
     print(f"  Stabilization rate: {results['stabilize_rate']:.2%}")
+    print(f"  Mean Lyapunov decrease-step ratio: {results['mean_v_decrease_ratio']:.3f}")
     
     # Save results
     Path(args.output_dir).mkdir(exist_ok=True, parents=True)
     
     summary_path = Path(args.output_dir) / "eval_summary.txt"
-    with open(summary_path, "w") as f:
+    with open(summary_path, "w", encoding="utf-8") as f:
         f.write("CartPole Controller Evaluation Results\n")
         f.write("="*50 + "\n\n")
         f.write(f"Total tests: {results['total_tests']}\n")
+        f.write(f"Eval scale: {results['eval_scale']:.2f}\n")
+        f.write(f"Eval range lo: {results['eval_lo']}\n")
+        f.write(f"Eval range hi: {results['eval_hi']}\n")
         f.write(f"Convergence rate: {results['convergence_rate']:.2%}\n")
         f.write(f"Lyapunov decrease rate: {results['lyap_decrease_rate']:.2%}\n")
+        f.write(f"Lyapunov drop rate: {results['v_drop_rate']:.2%}\n")
         f.write(f"Stabilization rate: {results['stabilize_rate']:.2%}\n")
+        f.write(f"Mean Lyapunov decrease-step ratio: {results['mean_v_decrease_ratio']:.3f}\n")
     
     print(f"\n[Output] Results saved to: {summary_path}")
 

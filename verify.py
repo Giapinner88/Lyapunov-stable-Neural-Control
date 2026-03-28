@@ -16,14 +16,14 @@ from typing import Dict
 if __package__ is None or __package__ == "":
     sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from core.runtime_utils import box_tensors, choose_device, load_trained_system
-from core.verification import (
+from neural_lyapunov_training.runtime_utils import box_tensors, choose_device, load_trained_system
+from neural_lyapunov_training.verification import (
     BisectionVerifier,
-    CartpoleLevelsetImplicationGraph,
+    CartpoleLyapunovLevelsetGraph,
     CrownRadiusVerifier,
     create_cartpole_verification_result,
 )
-from core.roa_utils import compute_rho_boundary, estimate_roa_size
+from neural_lyapunov_training.roa_utils import compute_rho_boundary, estimate_roa_size
 
 
 def format_ratio_percent(ratio: float) -> str:
@@ -63,26 +63,24 @@ def build_bab_artifacts(
     dynamics: nn.Module,
     alpha_lyap: float,
     rho: float,
-    implication_m: float,
+    tolerance: float,
     x_min: torch.Tensor,
     x_max: torch.Tensor,
     output_dir: Path,
 ) -> Dict[str, str]:
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    graph = CartpoleLevelsetImplicationGraph(
+    graph = CartpoleLyapunovLevelsetGraph(
         controller=controller,
         lyapunov=lyapunov,
         dynamics=dynamics,
         alpha_lyap=alpha_lyap,
-        rho=rho,
-        implication_m=implication_m,
     ).to(torch.device("cpu"))
     graph.eval()
 
-    onnx_path = output_dir / "cartpole_levelset_implication.onnx"
-    vnnlib_path = output_dir / "cartpole_levelset_implication.vnnlib"
-    yaml_path = output_dir / "cartpole_levelset_implication.yaml"
+    onnx_path = output_dir / "cartpole_lyapunov_in_levelset.onnx"
+    vnnlib_path = output_dir / "cartpole_lyapunov_in_levelset.vnnlib"
+    yaml_path = output_dir / "cartpole_lyapunov_in_levelset.yaml"
 
     dummy_x = torch.zeros(1, dynamics.nx, dtype=torch.float32)
     torch.onnx.export(
@@ -100,20 +98,28 @@ def build_bab_artifacts(
     with open(vnnlib_path, "w", encoding="utf-8") as f:
         for i in range(dynamics.nx):
             f.write(f"(declare-const X_{i} Real)\n")
-        f.write("(declare-const Y_0 Real)\n\n")
+        f.write("(declare-const Y_0 Real)\n")
+        f.write("(declare-const Y_1 Real)\n")
+        for i in range(dynamics.nx):
+            f.write(f"(declare-const Y_{2 + i} Real)\n")
+        f.write("\n")
 
         for i in range(dynamics.nx):
             f.write(f"(assert (>= X_{i} {float(x_min[i]):.10f}))\n")
             f.write(f"(assert (<= X_{i} {float(x_max[i]):.10f}))\n")
 
-        # Unsafe set: F_verify(x) >= 0, where
-        # F_verify = DeltaV - M * ReLU(V - rho)
-        # Proving UNSAT means implication holds for all x in the box.
-        f.write("\n(assert (>= Y_0 0.0))\n")
+        f.write("\n")
+        f.write("(assert (or\n")
+        f.write(f"  (and (<= Y_0 -{tolerance:.10f}))\n")
+        for i in range(dynamics.nx):
+            f.write(f"  (and (<= Y_{2 + i} {float(x_min[i]) - tolerance:.10f}))\n")
+            f.write(f"  (and (>= Y_{2 + i} {float(x_max[i]) + tolerance:.10f}))\n")
+        f.write("))\n")
+        f.write(f"(assert (<= Y_1 {rho:.10f}))\n")
 
     with open(yaml_path, "w", encoding="utf-8") as f:
         f.write("model:\n")
-        f.write(f"  onnx_path: {onnx_path.resolve()}\n")
+        f.write(f"  onnx_model_path: {onnx_path.resolve()}\n")
         f.write("specification:\n")
         f.write(f"  vnnlib_path: {vnnlib_path.resolve()}\n")
         f.write("solver:\n")
@@ -153,13 +159,13 @@ def verify_cartpole_roa(
     controller_path: str,
     lyapunov_path: str,
     output_dir: str = "./verification_results",
-    alpha_lyap: float = 0.05,
+    alpha_lyap: float = 0.01,
     run_crown: bool = True,
     crown_eps_max: float = 1.0,
     crown_method: str = "CROWN",
     run_bab: bool = False,
     bab_rho: float | None = None,
-    bab_implication_m: float = 100.0,
+    bab_tolerance: float = 1e-6,
     verbose: bool = True,
 ) -> Dict:
     """
@@ -292,7 +298,7 @@ def verify_cartpole_roa(
                 dynamics=dynamics,
                 alpha_lyap=alpha_lyap,
                 rho=rho_for_bab,
-                implication_m=float(bab_implication_m),
+                tolerance=float(bab_tolerance),
                 x_min=x_min,
                 x_max=x_max,
                 output_dir=artifact_dir,
@@ -300,7 +306,8 @@ def verify_cartpole_roa(
             bab_run = run_bab_complete_verifier(artifacts["yaml_path"])
             result["bab_artifacts"] = artifacts
             result["bab_rho"] = rho_for_bab
-            result["bab_implication_m"] = float(bab_implication_m)
+            result["bab_tolerance"] = float(bab_tolerance)
+            result["bab_check_x_next"] = True
             result["bab_command"] = bab_run["command"]
             result["bab_returncode"] = bab_run["returncode"]
             result["bab_stdout_tail"] = bab_run["stdout"][-4000:]
@@ -366,7 +373,8 @@ def verify_cartpole_roa(
         if "bab_returncode" in result:
             f.write(f"BaB return code: {result['bab_returncode']}\n")
             f.write(f"BaB rho: {result.get('bab_rho', 0.0):.6f}\n")
-            f.write(f"BaB implication_m: {result.get('bab_implication_m', 0.0):.6f}\n")
+            f.write(f"BaB tolerance: {result.get('bab_tolerance', 0.0):.3e}\n")
+            f.write(f"BaB check_x_next: {result.get('bab_check_x_next', True)}\n")
             if "bab_artifacts" in result:
                 f.write(f"BaB artifacts: {result['bab_artifacts']}\n")
         elif "bab_error" in result:
@@ -403,7 +411,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--alpha-lyap",
         type=float,
-        default=0.05,
+        default=0.01,
         help="Lyapunov decrease rate",
     )
     parser.add_argument(
@@ -435,12 +443,7 @@ if __name__ == "__main__":
         default=None,
         help="Level-set rho for BaB implication spec (default: use certified rho from step 2)",
     )
-    parser.add_argument(
-        "--bab-implication-m",
-        type=float,
-        default=100.0,
-        help="Big-M coefficient for implication formulation in BaB spec",
-    )
+    parser.add_argument("--bab-tolerance", type=float, default=1e-6)
 
     args = parser.parse_args()
     
@@ -454,7 +457,7 @@ if __name__ == "__main__":
         crown_method=args.crown_method,
         run_bab=args.run_bab,
         bab_rho=args.bab_rho,
-        bab_implication_m=args.bab_implication_m,
+        bab_tolerance=args.bab_tolerance,
         verbose=True,
     )
     

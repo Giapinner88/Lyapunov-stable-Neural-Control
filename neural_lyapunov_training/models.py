@@ -28,11 +28,11 @@ class NeuralController(nn.Module):
         layers = []
         in_size = nx
         for h in hidden_sizes:
-            layers.append(nn.Linear(in_size, h, bias=False))
+            layers.append(nn.Linear(in_size, h, bias=True))
             layers.append(nn.Tanh())  
             in_size = h
             
-        layers.append(nn.Linear(in_size, nu, bias=False))
+        layers.append(nn.Linear(in_size, nu, bias=True))
         layers.append(nn.Tanh()) 
         
         self.net = nn.Sequential(*layers)
@@ -52,8 +52,12 @@ class NeuralController(nn.Module):
         return u_out
 
     def load_state_dict(self, state_dict, strict: bool = True):
-        # Backward compatibility: old checkpoints may contain bias tensors.
-        filtered = {k: v for k, v in state_dict.items() if not k.endswith(".bias")}
+        # Keep checkpoint biases when present; only backfill missing bias tensors.
+        filtered = dict(state_dict)
+        current = self.state_dict()
+        for k, v in current.items():
+            if k.endswith(".bias") and k not in filtered:
+                filtered[k] = v
         return super().load_state_dict(filtered, strict=strict)
 
 
@@ -66,11 +70,15 @@ class NeuralLyapunov(nn.Module):
         nx: int,
         hidden_sizes: list = [64, 64],
         eps: float = 0.01,
+        phi_dim: int = 1,
+        absolute_output: bool = True,
         state_limits: torch.Tensor | list[float] | tuple[float, ...] | None = None,
     ):
         super().__init__()
         if eps <= 0.0:
             raise ValueError("eps phải > 0 để đảm bảo V(x) dương xác định nghiêm ngặt")
+        if phi_dim <= 0:
+            raise ValueError("phi_dim must be >= 1")
         
         if state_limits is None:
             state_limits = torch.ones(nx)
@@ -82,12 +90,13 @@ class NeuralLyapunov(nn.Module):
         layers = []
         in_size = nx
         for h in hidden_sizes:
-            layers.append(nn.Linear(in_size, h, bias=False))
+            layers.append(nn.Linear(in_size, h, bias=True))
             layers.append(nn.Tanh())
             in_size = h
         
-        layers.append(nn.Linear(in_size, nx, bias=False)) 
+        layers.append(nn.Linear(in_size, phi_dim, bias=True))
         self.phi_V = nn.Sequential(*layers)
+        self.absolute_output = bool(absolute_output)
         
         # FIX: Khởi tạo R lớn hơn (từ 0.1 → 0.5) để P = R^T*R kích thước hợp lý
         self.R = nn.Parameter(torch.randn(nx, nx) * 0.1)
@@ -98,15 +107,21 @@ class NeuralLyapunov(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         zero_norm = self.origin.unsqueeze(0) / self.state_limits
-        with torch.no_grad():
-            phi_0 = self.phi_V(zero_norm).squeeze(0)
+        phi_0 = self.phi_V(zero_norm)
 
         x_norm = x / self.state_limits
         phi_x = self.phi_V(x_norm)
         
         # Use relu(x) + relu(-x) instead of torch.abs(x) since the verification code does relu splitting.
         diff = phi_x - phi_0
-        term1 = torch.sum(torch.nn.functional.relu(diff) + torch.nn.functional.relu(-diff), dim=1, keepdim=True)
+        if self.absolute_output:
+            term1 = torch.sum(
+                torch.nn.functional.relu(diff) + torch.nn.functional.relu(-diff),
+                dim=1,
+                keepdim=True,
+            )
+        else:
+            term1 = torch.sum(diff, dim=1, keepdim=True)
         
         P = self.eps * self.eye + torch.matmul(self.R.T, self.R)
         Px = torch.matmul(x, P)
@@ -138,12 +153,29 @@ class NeuralLyapunov(nn.Module):
 
     def load_state_dict(self, state_dict, strict: bool = True):
         # Backward compatibility: old checkpoints stored origin as shape [1, nx].
-        # Also drop bias tensors from legacy checkpoints.
-        state_dict = {k: v for k, v in state_dict.items() if not k.endswith(".bias")}
+        # Keep checkpoint biases when present; only backfill if missing.
+        state_dict = dict(state_dict)
+        out_key = "phi_V.-1.weight"
+        if out_key in state_dict:
+            target = self.phi_V[-1].weight
+            source = state_dict[out_key]
+            if source.shape != target.shape:
+                if source.ndim == 2 and target.ndim == 2 and source.shape[1] == target.shape[1]:
+                    # Legacy checkpoints may have multi-dimensional phi output. Collapse by mean.
+                    state_dict = state_dict.copy()
+                    state_dict[out_key] = source.mean(dim=0, keepdim=True).to(dtype=target.dtype)
+                else:
+                    raise RuntimeError(
+                        f"Incompatible shape for {out_key}: checkpoint {tuple(source.shape)} vs model {tuple(target.shape)}"
+                    )
         origin_key = "origin"
         if origin_key in state_dict:
             origin_tensor = state_dict[origin_key]
             if origin_tensor.ndim == 2 and origin_tensor.shape[0] == 1:
                 state_dict = state_dict.copy()
                 state_dict[origin_key] = origin_tensor.squeeze(0)
+        current = self.state_dict()
+        for k, v in current.items():
+            if k.endswith(".bias") and k not in state_dict:
+                state_dict[k] = v
         return super().load_state_dict(state_dict, strict=strict)

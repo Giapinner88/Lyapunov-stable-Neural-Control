@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 import scipy.linalg as la
+import scipy.signal as signal
 
 
 # ==========================================
@@ -30,7 +31,7 @@ class BaseDynamics(nn.Module):
 # 3. INVERTED PENDULUM DYNAMICS
 # ==========================================
 class PendulumDynamics(BaseDynamics):
-    def __init__(self, m=0.15, l=0.5, b=0.1, g=9.81, dt=0.02):
+    def __init__(self, m=0.15, l=0.5, b=0.1, g=9.81, dt=0.02, position_integration: str = "midpoint"):
         super().__init__(nx=2, nu=1, dt=dt)
         
         # Đăng ký các hằng số vật lý như là parameters/buffers 
@@ -39,6 +40,10 @@ class PendulumDynamics(BaseDynamics):
         self.register_buffer('l', torch.tensor(l))
         self.register_buffer('b', torch.tensor(b))
         self.register_buffer('g', torch.tensor(g))
+        integration_mode = str(position_integration).lower()
+        if integration_mode not in {"euler", "midpoint"}:
+            raise ValueError("position_integration for pendulum must be one of: euler, midpoint")
+        self.position_integration = integration_mode
 
     def continuous_dynamics(self, x: torch.Tensor, u: torch.Tensor) -> torch.Tensor:
         theta = x[:, 0:1]
@@ -48,6 +53,19 @@ class PendulumDynamics(BaseDynamics):
         theta_ddot = (self.m * self.g * self.l * torch.sin(theta) - self.b * theta_dot + u) / I
         
         return torch.cat([theta_dot, theta_ddot], dim=1)
+
+    def step(self, x: torch.Tensor, u: torch.Tensor) -> torch.Tensor:
+        x_dot = self.continuous_dynamics(x, u)
+        if self.position_integration == "euler":
+            return x + x_dot * self.dt
+
+        theta = x[:, 0:1]
+        theta_dot = x[:, 1:2]
+        theta_ddot = x_dot[:, 1:2]
+
+        theta_dot_next = theta_dot + self.dt * theta_ddot
+        theta_next = theta + 0.5 * self.dt * (theta_dot + theta_dot_next)
+        return torch.cat([theta_next, theta_dot_next], dim=1)
 
     def get_lqr_baseline(self):
         """
@@ -188,14 +206,12 @@ class CartpoleDynamics(BaseDynamics):
         A_c = np.stack(A_rows, axis=0)
         B_c = np.stack(B_rows, axis=0)
 
-        # ---------------------------------------------------------
-        # CHUYỂN ĐỔI SANG KHÔNG GIAN RỜI RẠC (EULER DISCRETIZATION)
-        # x_{k+1} = x_k + dt * (A_c * x_k + B_c * u_k)
-        #         = (I + A_c * dt) * x_k + (B_c * dt) * u_k
-        # ---------------------------------------------------------
-        I = np.eye(self.nx)
-        A_d = I + A_c * self.dt
-        B_d = B_c * self.dt
+        # Discretize continuous linearization over one control step with ZOH.
+        A_d, B_d, _, _, _ = signal.cont2discrete(
+            (A_c, B_c, np.eye(self.nx), np.zeros((self.nx, self.nu))),
+            self.dt,
+            method="zoh",
+        )
 
         # Trọng số Q, R (CartPole ví dụ)
         Q = np.diag([5.0, 1.0, 20.0, 2.0])

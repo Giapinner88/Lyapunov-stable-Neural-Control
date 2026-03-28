@@ -128,6 +128,13 @@ def verify_lyapunov_condition(
     dynamics.eval()
     controller.eval()
     
+    def _decrease_expr(x_next: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
+        if hasattr(lyapunov, "algebraic_decrease"):
+            return lyapunov.algebraic_decrease(x_next, x, alpha_lyap)
+        v_next_local = lyapunov(x_next)
+        v_curr_local = lyapunov(x)
+        return v_next_local - (1.0 - alpha_lyap) * v_curr_local
+
     with torch.no_grad():
         # Compute V(x)
         v_x = lyapunov(x_samples)
@@ -141,22 +148,34 @@ def verify_lyapunov_condition(
         if x_inside.shape[0] > 0:
             u = controller(x_inside)
             x_next = dynamics.step(x_inside, u)
-            v_next = lyapunov(x_next)
-            v_curr = lyapunov(x_inside)
-            
+
             # Check decrease: V(x+1) - (1-α)V(x) ≤ 0
-            decrease = v_next - (1 - alpha_lyap) * v_curr
-            violation_inside = (decrease > 0).float().mean().item()
-            max_decrease_violation = decrease.max().item()
+            decrease = _decrease_expr(x_next, x_inside)
+            decrease_violation_mask = (decrease > 0.0).squeeze(1)
+            max_decrease_violation = float(torch.clamp(decrease.max(), min=0.0).item())
+
+            if x_min is not None and x_max is not None:
+                x_min_t = torch.as_tensor(x_min, device=x_samples.device, dtype=x_samples.dtype).view(1, -1)
+                x_max_t = torch.as_tensor(x_max, device=x_samples.device, dtype=x_samples.dtype).view(1, -1)
+                in_box_next = ((x_next >= x_min_t) & (x_next <= x_max_t)).all(dim=1)
+                box_violation_mask = ~in_box_next
+                next_out_of_box = box_violation_mask.float().mean().item()
+            else:
+                box_violation_mask = torch.zeros_like(decrease_violation_mask)
+                next_out_of_box = 0.0
+
+            combined_violation_mask = decrease_violation_mask | box_violation_mask
+            violation_inside = combined_violation_mask.float().mean().item()
         else:
             violation_inside = 0.0
             max_decrease_violation = 0.0
+            next_out_of_box = 0.0
         
         # For points outside ROA, they're automatically satisfied
         violation_outside = 0.0
         
-        # Compute overall satisfaction
-        total_violation_count = inside_roa.sum().item() * (1 - (1 - violation_inside))
+        # Compute overall satisfaction over all sampled states.
+        total_violation_count = float(inside_roa.sum().item()) * violation_inside
         total_samples = x_samples.shape[0]
         satisfaction_rate = 1.0 - (total_violation_count / max(1, total_samples))
     
@@ -164,6 +183,7 @@ def verify_lyapunov_condition(
         "roa_ratio": inside_roa.float().mean().item(),
         "violation_inside_roa": violation_inside,
         "max_decrease_violation": max_decrease_violation,
+        "next_out_of_box_inside_roa": next_out_of_box,
         "overall_satisfaction": satisfaction_rate,
         "n_samples": x_samples.shape[0],
     }

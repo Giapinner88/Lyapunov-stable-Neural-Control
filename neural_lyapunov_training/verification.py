@@ -152,6 +152,45 @@ class CartpoleLevelsetImplicationGraph(nn.Module):
         return delta_v - self.implication_m * penalty
 
 
+class CartpoleLyapunovLevelsetGraph(nn.Module):
+    """
+    Paper-style graph for VNNLIB level-set verification.
+
+    Output layout:
+      Y_0 = -(V(x_next) - (1-alpha)V(x))
+      Y_1 = V(x)
+      Y_{2+i} = x_next[i]
+    """
+
+    def __init__(
+        self,
+        controller: nn.Module,
+        lyapunov: nn.Module,
+        dynamics: nn.Module,
+        alpha_lyap: float = 0.01,
+    ):
+        super().__init__()
+        self.controller = controller
+        self.lyapunov = lyapunov
+        self.dynamics = dynamics
+        self.alpha_lyap = float(alpha_lyap)
+
+    def _decrease_expression(self, x_next: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
+        if hasattr(self.lyapunov, "algebraic_decrease"):
+            return self.lyapunov.algebraic_decrease(x_next, x, self.alpha_lyap)
+        v_next = self.lyapunov(x_next)
+        v_curr = self.lyapunov(x)
+        return v_next - (1.0 - self.alpha_lyap) * v_curr
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        u = self.controller(x)
+        x_next = self.dynamics.step(x, u)
+        delta_v = self._decrease_expression(x_next, x)
+        y0 = -delta_v
+        y1 = self.lyapunov(x)
+        return torch.cat([y0, y1, x_next], dim=1)
+
+
 class VerificationCondition:
     """
     Represents the verification condition:

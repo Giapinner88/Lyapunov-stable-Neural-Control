@@ -1,5 +1,13 @@
 import torch
 
+try:
+    from auto_LiRPA import BoundedModule, BoundedTensor
+    from auto_LiRPA.perturbations import PerturbationLpNorm
+except Exception:
+    BoundedModule = None
+    BoundedTensor = None
+    PerturbationLpNorm = None
+
 
 def lyapunov_decrease_expression(lyapunov, x_next: torch.Tensor, x: torch.Tensor, alpha_lyap: float) -> torch.Tensor:
     if hasattr(lyapunov, "algebraic_decrease"):
@@ -231,10 +239,19 @@ class CEGISLoop:
         local_box_samples: int = 256,
         local_box_weight: float = 0.2,
         equilibrium_weight: float = 0.1,
+        lqr_anchor_weight: float = 0.01,
         local_sampling_mode: str = "levelset",
         local_levelset_c: float | None = None,
         local_levelset_quantile: float = 0.6,
         local_levelset_oversample_factor: int = 6,
+        ibp_ratio: float = 0.0,
+        ibp_eps: float = 0.01,
+        candidate_roa_weight: float = 0.0,
+        candidate_roa_num_samples: int = 0,
+        candidate_roa_scale: float = 0.4,
+        candidate_roa_rho: float | None = None,
+        candidate_roa_rho_quantile: float = 0.9,
+        candidate_roa_always: bool = False,
         box_lo: torch.Tensor | None = None,
         box_up: torch.Tensor | None = None,
         loss_weights: tuple[float, float, float] = (1.0, 1.0, 1.0),
@@ -251,13 +268,49 @@ class CEGISLoop:
         self.local_box_samples = int(local_box_samples)
         self.local_box_weight = float(local_box_weight)
         self.equilibrium_weight = float(equilibrium_weight)
+        self.lqr_anchor_weight = float(lqr_anchor_weight)
         self.local_sampling_mode = str(local_sampling_mode).lower()
         self.local_levelset_c = None if local_levelset_c is None else float(local_levelset_c)
         self.local_levelset_quantile = float(local_levelset_quantile)
         self.local_levelset_oversample_factor = max(1, int(local_levelset_oversample_factor))
+        self.ibp_ratio = float(ibp_ratio)
+        self.ibp_eps = float(ibp_eps)
+        self.candidate_roa_weight = float(candidate_roa_weight)
+        self.candidate_roa_num_samples = int(candidate_roa_num_samples)
+        self.candidate_roa_scale = float(candidate_roa_scale)
+        self.candidate_roa_rho = None if candidate_roa_rho is None else float(candidate_roa_rho)
+        self.candidate_roa_rho_quantile = float(candidate_roa_rho_quantile)
+        self.candidate_roa_always = bool(candidate_roa_always)
         self.box_lo = None if box_lo is None else torch.as_tensor(box_lo, dtype=torch.float32).view(1, -1)
         self.box_up = None if box_up is None else torch.as_tensor(box_up, dtype=torch.float32).view(1, -1)
         self.loss_weights = tuple(float(w) for w in loss_weights)
+        self.last_candidate_roa_loss = 0.0
+
+    def _ibp_decrease_loss(self, x_samples: torch.Tensor, alpha_lyap: float) -> torch.Tensor:
+        if self.ibp_ratio <= 0.0:
+            return torch.zeros((), device=x_samples.device, dtype=x_samples.dtype)
+        if BoundedModule is None or BoundedTensor is None or PerturbationLpNorm is None:
+            return torch.zeros((), device=x_samples.device, dtype=x_samples.dtype)
+
+        class DecreaseModel(torch.nn.Module):
+            def __init__(self, dynamics, controller, lyapunov, alpha):
+                super().__init__()
+                self.dynamics = dynamics
+                self.controller = controller
+                self.lyapunov = lyapunov
+                self.alpha = alpha
+
+            def forward(self, x):
+                u = self.controller(x)
+                x_next = self.dynamics.step(x, u)
+                return lyapunov_decrease_expression(self.lyapunov, x_next, x, self.alpha)
+
+        decrease_model = DecreaseModel(self.dynamics, self.controller, self.lyapunov, alpha_lyap)
+        bounded_model = BoundedModule(decrease_model, x_samples, device=x_samples.device)
+        ptb = PerturbationLpNorm(norm=float("inf"), eps=self.ibp_eps)
+        bounded_x = BoundedTensor(x_samples, ptb)
+        _, ub = bounded_model.compute_bounds(x=(bounded_x,), method="IBP", bound_upper=True)
+        return torch.clamp(ub + self.violation_margin, min=0.0).mean()
 
     def _sample_local_points(self, x_ref: torch.Tensor) -> torch.Tensor:
         device = x_ref.device
@@ -320,6 +373,45 @@ class CEGISLoop:
         perm = torch.randperm(x_batch.shape[0], device=device)
         return x_batch[perm]
 
+    def _candidate_roa_regularizer(
+        self,
+        x_samples: torch.Tensor,
+        x_bounds: tuple,
+        base_loss: torch.Tensor,
+    ) -> torch.Tensor:
+        # Paper-style candidate-ROA regularizer: weight * mean(relu(V(x)/rho - 1)).
+        if self.candidate_roa_weight <= 0.0 or self.candidate_roa_num_samples <= 0:
+            return torch.zeros((), device=x_samples.device, dtype=x_samples.dtype)
+
+        if (not self.candidate_roa_always) and float(base_loss.detach().item()) <= 0.0:
+            return torch.zeros((), device=x_samples.device, dtype=x_samples.dtype)
+
+        x_min, x_max = x_bounds
+        x_min_t = torch.as_tensor(x_min, device=x_samples.device, dtype=x_samples.dtype).view(1, -1)
+        x_max_t = torch.as_tensor(x_max, device=x_samples.device, dtype=x_samples.dtype).view(1, -1)
+
+        scale = min(max(self.candidate_roa_scale, 1e-3), 1.0)
+        center = 0.5 * (x_min_t + x_max_t)
+        span = (x_max_t - x_min_t) * scale
+        cand_lo = center - 0.5 * span
+        cand_hi = center + 0.5 * span
+        x_candidate = cand_lo + torch.rand(
+            (self.candidate_roa_num_samples, self.dynamics.nx),
+            device=x_samples.device,
+            dtype=x_samples.dtype,
+        ) * (cand_hi - cand_lo)
+
+        if self.candidate_roa_rho is not None and self.candidate_roa_rho > 0.0:
+            rho = torch.tensor(self.candidate_roa_rho, device=x_samples.device, dtype=x_samples.dtype)
+        else:
+            with torch.no_grad():
+                v_ref = self.lyapunov(x_samples).view(-1)
+                q = min(max(self.candidate_roa_rho_quantile, 0.0), 1.0)
+                rho = torch.quantile(v_ref, q).clamp(min=torch.tensor(1e-6, device=v_ref.device, dtype=v_ref.dtype))
+
+        q_val = self.lyapunov(x_candidate) / rho - 1.0
+        return self.candidate_roa_weight * torch.nn.functional.relu(q_val).mean()
+
     def cegis_step(
         self,
         x_seed: torch.Tensor,
@@ -349,7 +441,13 @@ class CEGISLoop:
             max_violation = torch.max(violation_debug).item()
             mean_violation = torch.mean(violation_debug).item()
         
-        loss = self.learner_step(x_train, alpha_lyap=alpha_lyap, K=K, S=S)  # <--- Truyền K, S vào đây
+        loss = self.learner_step(
+            x_train,
+            x_bounds=x_bounds,
+            alpha_lyap=alpha_lyap,
+            K=K,
+            S=S,
+        )
 
         return {
             "loss": loss,
@@ -358,9 +456,17 @@ class CEGISLoop:
             "train_batch_size": int(x_train.shape[0]),
             "max_violation": max_violation,
             "mean_violation": mean_violation,
+            "candidate_roa_loss": float(self.last_candidate_roa_loss),
         }
 
-    def learner_step(self, x_samples: torch.Tensor, alpha_lyap: float, K: torch.Tensor, S: torch.Tensor):
+    def learner_step(
+        self,
+        x_samples: torch.Tensor,
+        x_bounds: tuple,
+        alpha_lyap: float,
+        K: torch.Tensor,
+        S: torch.Tensor,
+    ):
         self.optimizer.zero_grad()
         
         # --- 1. LOSS VI PHẠM TỪ PGD (Mở rộng ranh giới) ---
@@ -389,6 +495,7 @@ class CEGISLoop:
         x_next_local = self.dynamics.step(x_local, u_local)
         local_violation = lyapunov_decrease_expression(self.lyapunov, x_next_local, x_local, alpha_lyap)
         local_decrease_loss = torch.mean(torch.relu(local_violation + self.violation_margin))
+        ibp_decrease_loss = self._ibp_decrease_loss(x_samples, alpha_lyap)
 
         # --- 1.2 LOSS ĐIỂM CÂN BẰNG (giữ điều kiện tại gốc) ---
         x_zero = torch.zeros((1, self.dynamics.nx), device=device)
@@ -410,16 +517,24 @@ class CEGISLoop:
         loss_v = torch.nn.functional.mse_loss(V_nn, V_lqr)
         
         # Gộp loss: diệt vi phạm global + local + giữ cân bằng + mỏ neo LQR
+        candidate_roa_loss = self._candidate_roa_regularizer(
+            x_samples=x_samples,
+            x_bounds=x_bounds,
+            base_loss=lyap_decrease_loss,
+        )
         loss = (
             lyap_decrease_loss
             + boundary_penalty_loss
             + self.local_box_weight * local_decrease_loss
+            + self.ibp_ratio * ibp_decrease_loss
             + self.equilibrium_weight * equilibrium_loss
-            + 0.01 * (loss_u + loss_v)
+            + self.lqr_anchor_weight * (loss_u + loss_v)
+            + candidate_roa_loss
         )
         
         loss.backward()
         self.optimizer.step()
+        self.last_candidate_roa_loss = float(candidate_roa_loss.detach().item())
         
         # FIX: Trả về loss THỰC TẾ được backprop, không phải từng bộ phận mà bị ignore
         return loss.item()

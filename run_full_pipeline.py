@@ -78,7 +78,7 @@ def export_vnnlib():
         sys.executable,
         str(export_script),
         "--alpha-lyap", "0.01",
-        "--implication-m", "100.0"
+        "--tolerance", "1e-6"
     ]
     
     print(f"[Pipeline] Running: {' '.join(cmd)}")

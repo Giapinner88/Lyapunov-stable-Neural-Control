@@ -50,7 +50,10 @@ def load_trained_system(
     config = get_default_config(system_name)
 
     if system_name == "cartpole":
-        dynamics = CartpoleDynamics().to(device)
+        dynamics = CartpoleDynamics(
+            max_force=config.model.u_bound,
+            position_integration="midpoint",
+        ).to(device)
     elif system_name == "pendulum":
         dynamics = PendulumDynamics().to(device)
     else:
@@ -65,6 +68,8 @@ def load_trained_system(
 
     lyapunov = NeuralLyapunov(
         nx=config.model.nx,
+        phi_dim=config.model.lyapunov_phi_dim,
+        absolute_output=config.model.lyapunov_absolute_output,
         state_limits=config.model.state_limits,
     ).to(device)
 

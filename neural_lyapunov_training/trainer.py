@@ -8,11 +8,11 @@ if __package__ is None or __package__ == "":
     # Allow running this file directly: python core/trainer.py
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from core.cegis import CEGISLoop, PGDAttacker
-from core.dynamics import CartpoleDynamics, PendulumDynamics
-from core.models import NeuralController, NeuralLyapunov
-from core.training_config import TrainerConfig
-from core.roa_utils import compute_rho_boundary, estimate_roa_size, verify_lyapunov_condition, ROATracker
+from neural_lyapunov_training.cegis import CEGISLoop, PGDAttacker
+from neural_lyapunov_training.dynamics import CartpoleDynamics, PendulumDynamics
+from neural_lyapunov_training.models import NeuralController, NeuralLyapunov
+from neural_lyapunov_training.training_config import TrainerConfig
+from neural_lyapunov_training.roa_utils import compute_rho_boundary, estimate_roa_size, verify_lyapunov_condition, ROATracker
 
 
 class LyapunovTrainer:
@@ -36,6 +36,8 @@ class LyapunovTrainer:
         ).to(self.device)
         self.lyapunov = NeuralLyapunov(
             nx=self.config.model.nx,
+            phi_dim=self.config.model.lyapunov_phi_dim,
+            absolute_output=self.config.model.lyapunov_absolute_output,
             state_limits=self.config.model.state_limits,
         ).to(self.device)
 
@@ -67,10 +69,19 @@ class LyapunovTrainer:
             local_box_samples=self.config.cegis.local_box_samples,
             local_box_weight=self.config.cegis.local_box_weight,
             equilibrium_weight=self.config.cegis.equilibrium_weight,
+            lqr_anchor_weight=self.config.cegis.lqr_anchor_weight,
             local_sampling_mode=self.config.cegis.local_sampling_mode,
             local_levelset_c=self.config.cegis.local_levelset_c,
             local_levelset_quantile=self.config.cegis.local_levelset_quantile,
             local_levelset_oversample_factor=self.config.cegis.local_levelset_oversample_factor,
+            ibp_ratio=self.config.cegis.ibp_ratio,
+            ibp_eps=self.config.cegis.ibp_eps,
+            candidate_roa_weight=self.config.cegis.candidate_roa_weight,
+            candidate_roa_num_samples=self.config.cegis.candidate_roa_num_samples,
+            candidate_roa_scale=self.config.cegis.candidate_roa_scale,
+            candidate_roa_rho=self.config.cegis.candidate_roa_rho,
+            candidate_roa_rho_quantile=self.config.cegis.candidate_roa_rho_quantile,
+            candidate_roa_always=self.config.cegis.candidate_roa_always,
             box_lo=self.x_min,
             box_up=self.x_max,
         )
@@ -193,6 +204,33 @@ class LyapunovTrainer:
         if epoch <= 0 or epoch % self.config.loop.sweep_every != 0:
             return
 
+        if self.system_name == "cartpole":
+            # CartPole local sweep: densely scan (theta, theta_dot) near upright with cart states near zero.
+            print(f"  [Sweep] CartPole local grid around upright at epoch {epoch}...")
+            sweep_grid = torch.linspace(-0.30, 0.30, 15, device=self.device)
+            x_sweep_list = []
+            for theta in sweep_grid:
+                for theta_dot in sweep_grid:
+                    x_sweep_list.append([0.0, 0.0, float(theta.item()), float(theta_dot.item())])
+
+            x_sweep = torch.tensor(x_sweep_list, dtype=torch.float32, device=self.device)
+            x_sweep[:, 0:1] += 0.05 * torch.randn((x_sweep.shape[0], 1), device=self.device)
+            x_sweep[:, 1:2] += 0.05 * torch.randn((x_sweep.shape[0], 1), device=self.device)
+
+            x_min, x_max = current_bounds
+            x_sweep = torch.clamp(x_sweep, min=x_min, max=x_max)
+            x_bad_sweep = self.cegis.attacker.attack(
+                x_sweep,
+                x_bounds=current_bounds,
+                alpha_lyap=self.config.loop.alpha_lyap,
+            )
+            self.cegis.counterexample_bank.add(x_bad_sweep)
+            print(
+                f"  [Sweep] Added {x_sweep.shape[0]} CartPole local-grid points to bank "
+                f"(bank size: {self.cegis.counterexample_bank.size})"
+            )
+            return
+
         if self.config.model.nx != 2:
             x_sweep = self._sample_near_origin(512, tuple(v * 1.5 for v in self.config.loop.lqr_anchor_radius))
             x_bad_sweep = self.cegis.attacker.attack(
@@ -202,7 +240,7 @@ class LyapunovTrainer:
             )
             self.cegis.counterexample_bank.add(x_bad_sweep)
             print(
-                f"  [Sweep] Thêm 512 điểm ngẫu nhiên gần gốc vào bank "
+                f"  [Sweep] Added 512 random near-origin points to bank "
                 f"(bank size: {self.cegis.counterexample_bank.size})"
             )
             return
