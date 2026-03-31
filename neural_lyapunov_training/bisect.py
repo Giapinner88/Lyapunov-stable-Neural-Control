@@ -3,17 +3,7 @@ import argparse
 import os
 import sys
 from contextlib import redirect_stdout, redirect_stderr
-
-
-def _ensure_complete_verifier_on_path() -> None:
-    repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    verifier_dir = os.path.join(repo_root, "alpha-beta-CROWN", "complete_verifier")
-    if os.path.isdir(verifier_dir) and verifier_dir not in sys.path:
-        sys.path.insert(0, verifier_dir)
-
-
-_ensure_complete_verifier_on_path()
-from abcrown import ABCROWN
+from complete_verifier import ABCROWN
 
 
 def check_rho(rho):

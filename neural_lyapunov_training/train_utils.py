@@ -4,7 +4,6 @@ import typing
 from typing import Optional
 import random
 import time
-from numpy.random import wald
 import logging
 
 import torch
@@ -12,7 +11,6 @@ import numpy as np
 import wandb
 from auto_LiRPA import BoundedTensor, BoundedModule
 from auto_LiRPA.perturbations import PerturbationLpNorm
-from auto_LiRPA.eps_scheduler import SmoothedScheduler
 import matplotlib.pyplot as plt
 from matplotlib import cm
 import neural_lyapunov_training.lyapunov as lyapunov

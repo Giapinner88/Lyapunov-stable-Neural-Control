@@ -1,21 +1,13 @@
 import torch
 
-try:
-    from auto_LiRPA.bound_ops import (
-        BoundActivation,
-        BoundMatMul,
-        BoundReduceSum,
-        BoundMul,
-        BoundSqr,
-        BoundParams,
-    )
-except ModuleNotFoundError:
-    from auto_LiRPA.operators.activation_base import BoundActivation
-    from auto_LiRPA.operators.linear import BoundMatMul
-    from auto_LiRPA.operators.reduce import BoundReduceSum
-    from auto_LiRPA.operators.bivariate import BoundMul
-    from auto_LiRPA.operators.activations import BoundSqr
-    from auto_LiRPA.operators.leaf import BoundParams
+from auto_LiRPA.bound_ops import (
+    BoundActivation,
+    BoundMatMul,
+    BoundReduceSum,
+    BoundMul,
+    BoundSqr,
+    BoundParams,
+)
 
 
 def optimize_graph(model, version="v1"):

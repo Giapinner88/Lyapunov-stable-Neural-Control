@@ -8,21 +8,15 @@ import torch
 import torch.nn as nn
 from auto_LiRPA import BoundedModule, BoundedTensor
 from auto_LiRPA.perturbations import *
-try:
-    from auto_LiRPA.bound_ops import (
-        BoundMul,
-        BoundTanh,
-        BoundSigmoid,
-        BoundSin,
-        BoundCos,
-        BoundTan,
-        BoundActivation,
-    )
-except ModuleNotFoundError:
-    from auto_LiRPA.operators.bivariate import BoundMul
-    from auto_LiRPA.operators.s_shaped import BoundTanh, BoundSigmoid, BoundTan
-    from auto_LiRPA.operators.trigonometric import BoundSin, BoundCos
-    from auto_LiRPA.operators.activation_base import BoundActivation
+from auto_LiRPA.bound_ops import (
+    BoundMul,
+    BoundTanh,
+    BoundSigmoid,
+    BoundSin,
+    BoundCos,
+    BoundTan,
+    BoundActivation,
+)
 import matplotlib.pyplot as plt
 from tqdm import trange
 from neural_lyapunov_training.models import (

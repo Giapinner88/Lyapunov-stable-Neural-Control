@@ -29,7 +29,7 @@ class PendulumDynamics:
         d_theta = theta_dot
         d_theta_dot = (
             (-self.beta / ml2) * theta_dot
-            + (self.g / self.l) * torch.sin(theta)
+            + (self.g / self.l) * torch.cos(theta)
             + u / ml2
         )
         return d_theta_dot

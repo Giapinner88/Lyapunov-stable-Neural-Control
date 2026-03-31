@@ -12,61 +12,16 @@ More details can be found in **our paper:**
 *Lujie Yang\*, Hongkai Dai\*, Zhouxing Shi, Cho-Jui Hsieh, Russ Tedrake, and Huan Zhang*
 "[Lyapunov-stable Neural Control for State and Output Feedback: A Novel Formulation](https://arxiv.org/pdf/2404.07956.pdf)" (\*Equal contribution)
 
-## Examples
+## Pendulum Focus
 
-We evaluate our training and verification method on several state-feedback and output-feedback systems with nonlinear dynamics.
+This repository is currently organized around the pendulum model, with separate runtime entry points for:
 
-| Pendulum & Path tracking <br> state feedback <br> | Pendulum output feedback|
-|:--:| :--:|
-|<img src="assets/pendulum_path_tracking.png" width="250"/> | <img src="assets/pendulum_output_feedback.png" width="290"/>|
+* state-feedback training
+* output-feedback training
 
-| Quadrotor state feedback| Quadrotor output feedback |
-|:--:| :--:|
-|<img src="assets/quadrotor_state.png" width="250"/>  | <img src="assets/quadrotor2d_output.png" width="268"/>|
+The structure remains modular (`neural_lyapunov_training/`) so additional models can be added later without changing the core architecture.
 
 # Code
-
-## Quick Operations
-
-The repository is now split by layers:
-
-- Root entrypoints (easy operations): `train.py`, `verify.py`, `export.py`
-- Workflow scripts and model recipes: `examples/`
-- Algorithm core and reusable modules: `neural_lyapunov_training/`
-- Verification configs/specs: `verification/`
-
-For day-to-day usage (pendulum/cartpole), run from repo root:
-
-```bash
-# Train pendulum state-feedback
-python train.py pendulum --variant state
-
-# Train pendulum output-feedback
-python train.py pendulum --variant output
-
-# Train cartpole state-feedback
-python train.py cartpole
-
-# Verify pendulum using default config
-python verify.py pendulum
-
-# Verify with a specific config
-python verify.py pendulum --config pendulum/pendulum_output_feedback_lyapunov_in_levelset.yaml -- --batch_size 131072
-
-# Verify cartpole (requires explicit config)
-python verify.py cartpole --config cartpole/cartpole_state_feedback_lyapunov_in_levelset.yaml
-
-# Export VNNLIB specs (pendulum/cartpole presets)
-python export.py pendulum --rho 672
-python export.py cartpole --rho 0.13
-```
-
-Pass extra arguments to the underlying training/verification scripts after `--`.
-Example:
-
-```bash
-python train.py cartpole -- --max-iter 2 --epochs 1
-```
 
 ## Installation
 
@@ -91,78 +46,51 @@ export PYTHONPATH="${PYTHONPATH}:$(pwd):$(pwd)/alpha-beta-CROWN:$(pwd)/alpha-bet
 
 ## Verification
 
-We have provided the models we trained and the specifications for verification we generated.
-To run verification with our **pre-trained models** and specifications:
+We have provided the trained pendulum models and specifications for verification.
+To run verification with the provided specifications:
 
 ```bash
 cd verification
 export CONFIG_PATH=$(pwd)
-cd ../alpha-beta-CROWN/complete_verifier
+cd complete_verifier
 
-# Run the following for each of the systems
-python abcrown.py --config $CONFIG_PATH/path_tracking_state_feedback_lyapunov_in_levelset.yaml
-python abcrown.py --config $CONFIG_PATH/pendulum/pendulum_state_feedback_lyapunov_in_levelset.yaml
-python abcrown.py --config $CONFIG_PATH/pendulum/pendulum_output_feedback_lyapunov_in_levelset.yaml
-python abcrown.py --config $CONFIG_PATH/quadrotor2d_state_feedback_lyapunov_in_levelset.yaml
-python abcrown.py --config $CONFIG_PATH/quadrotor2d_output_feedback_lyapunov_in_levelset.yaml
+python abcrown.py --config $CONFIG_PATH/pendulum_state_feedback_lyapunov_in_levelset.yaml
+python abcrown.py --config $CONFIG_PATH/pendulum_output_feedback_lyapunov_in_levelset.yaml
 ```
-
-The verification will output a summary of results. For example, here are the
-results we obtained on Pendulum Output Feedback using `pendulum/pendulum_output_feedback_lyapunov_in_levelset.yaml`:
-```
-############# Summary #############
-Final verified acc: 100.0% (total 8 examples)
-Problem instances count: 8 , total verified (safe/unsat): 8 , total falsified (unsafe/sat): 0 , timeout: 0
-mean time for ALL instances (total 8):12.023795893354652, max time: 23.111693859100342
-mean time for verified SAFE instances(total 8): 12.023810923099518, max time: 23.111693859100342
-safe (total 8), index: [0, 1, 2, 3, 4, 5, 6, 7]
-```
-It shows that the 8 examples (sub-regions for verification) are all verified
-and no example is falsified or timeout. Therefore, the verification fully succeeded.
-
-Our verification configurations have been tested on a GPU with 48GB memory.
-If you are using a GPU with less memory, you may decrease the batch size
-of verification by modifying the `batch_size` item in the configuration files
-or passing an argument `--batch_size BATCH_SIZE`,
-until it fits into the GPU memory.
 
 ## Training
 
-```
-python examples/pendulum/state_training.py
-python examples/pendulum/output_training.py
-python examples/cartpole/state_training.py
-python examples/path_tracking_state_training.py
-python examples/quadrotor2d_state_training.py
-python examples/quadrotor2d_output_training.py
+Run pendulum training directly from the new app layer:
+
+```bash
+python -m apps.pendulum.state_feedback
+python -m apps.pendulum.output_feedback
 ```
 
-All the training files provide an estimate of the sublevel set value $\hat \rho_{\text{max}}$, figures of ROA slices and $V(x_t)$ along simulated trajectories after the training ends.
+or as scripts:
 
-We use `hydra` to manage all the configurations. Take pendulum state feedback training as an example, it loads the configuration file in `examples/config/pendulum/pendulum_state_training.yaml` file for all the parameters. To set your specific parameters, we recommend adding the config file in examples/config/user/USERNAME.yaml, and then run the command
-```
-python examples/pendulum/state_training.py user=USERNAME
-```
-You can pattern match `examples/config/user/pendulum_state_training_default.yaml` file to set your own `USERNAME.yaml`.
-
-To reproduce the pendulum state traning result in our paper, please use the following command with a non-default config file
-
-```
-python examples/pendulum/state_training.py --config-name pendulum_state_training_reproduce
+```bash
+python apps/pendulum/state_feedback.py
+python apps/pendulum/output_feedback.py
 ```
 
-Note that each run will create a directory, specified in `user.run_dir` in the configuration yaml file. The directory will contain the learned model, wandb data, and the configuration file `config.yaml` used for that run, so that you can easily reproduce the result with the saved configuration file.
+Hydra configuration files are in `apps/pendulum/config/`.
 
-You can change `cfg.model.limit_scale` to increase the region for training. We recommend starting from 0.1 and gradually grow the limit scale to 1.0, using models from smaller regions as initializations for larger regions. You can also change `cfg.model.rho_multiplier` to encourage the growth of the sublevel set.
+To override user-specific settings:
 
-Before the end of the training procedure, the program will first test the trained models using projected gradient descent (PGD). Usually, PGD won't be able to find any counterexamples at the end of training, so the models are ready for formal verification. In addition, `rho` used during training will be printed out, which can be used as the `--init_rho` for the bisection in the verification step.
-
-```
-[2024-04-11 00:42:36,757][__main__][INFO] - PGD verifier finds counter examples? False
-rho =  0.12872669100761414
+```bash
+python -m apps.pendulum.state_feedback user=USERNAME
 ```
 
-If PGD attacks can still find counterexamples after training, you should set `cfg.train.train_lyaloss = False` and decrease the last entry of `cfg.model.rho_multiplier` until PGD attack can no longer find counterexamples to obtain a more accurate $\hat \rho_{\text{max}}$.
+Use `apps/pendulum/config/user/state_feedback_default.yaml` as a template.
+
+To reproduce the pendulum state-feedback result in the paper:
+
+```bash
+python -m apps.pendulum.state_feedback --config-name state_feedback_reproduce
+```
+
+Each run creates an output directory specified by `user.run_dir`, containing learned models, wandb logs, and the exact `config.yaml` used for reproducibility.
 
 ## Preparing Specifications for Verification
 
@@ -198,7 +126,7 @@ cd verification
 python -m neural_lyapunov_training.bisect \
 --lower_limit -12 -12 --upper_limit 12 12 --hole_size 0.001 \
 --init_rho 603.5202 --rho_eps 0.1 \
---config pendulum/pendulum_state_feedback_lyapunov_in_levelset.yaml \
+--config pendulum_state_feedback_lyapunov_in_levelset.yaml \
 --timeout 100
 ```
 
@@ -233,7 +161,7 @@ cd verification
 python -m neural_lyapunov_training.generate_vnnlib \
 --lower_limit -12 -12 --upper_limit 12 12 --hole_size 0.001 \
 --value_levelset 672 \
-specs/pendulum/pendulum_state_feedback
+specs/pendulum_state_feedback
 ```
 
 You can then run verification, as we mentioned in the "Verification" section.

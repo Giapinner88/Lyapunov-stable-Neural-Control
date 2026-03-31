@@ -5,15 +5,7 @@ import json
 import torch
 import numpy as np
 
-
-def _ensure_complete_verifier_on_path() -> None:
-    repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    verifier_dir = os.path.join(repo_root, "alpha-beta-CROWN", "complete_verifier")
-    if os.path.isdir(verifier_dir) and verifier_dir not in sys.path:
-        sys.path.insert(0, verifier_dir)
-
-
-_ensure_complete_verifier_on_path()
+sys.path = ["complete_verifier"] + sys.path
 from arguments import ConfigHandler
 from abcrown import ABCROWN
 
