@@ -8,7 +8,6 @@ import logging
 
 import torch
 import numpy as np
-import wandb
 from auto_LiRPA import BoundedTensor, BoundedModule
 from auto_LiRPA.perturbations import PerturbationLpNorm
 import matplotlib.pyplot as plt
@@ -1022,6 +1021,8 @@ def train_lyapunov_with_buffer(
                     save_best_model,
                 )
         if enable_wandb:
+            import wandb
+
             wandb.log(
                 {
                     "buffer_loss": batch_train_lyapunov_ret.buffer_loss,

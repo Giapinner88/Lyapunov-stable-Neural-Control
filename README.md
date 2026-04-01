@@ -398,8 +398,15 @@ python -m neural_lyapunov_training.generate_vnnlib \
 
 - **`data/pendulum/state_feedback/`** – Initial weights, training datasets for state-feedback experiments
 - **`data/pendulum/output_feedback/`** – Initial weights, training datasets for output-feedback experiments
-- **`models/`** – Pre-trained `.pth` checkpoints (ready to use)
+- **`models/`** – Canonical checkpoints used by simulation/inference scripts (single source of truth)
+- **`output/pendulum_*/*/*/`** – Per-run Hydra artifacts (configs, logs, run-specific checkpoints)
 - **`baselines/nlc_discrete/models/`** – Pre-trained baseline models for comparison
+
+Checkpoint convention for pendulum workflows:
+
+- Output-feedback training updates `models/pendulum_output_feedback.pth` as the canonical runtime model.
+- Run-specific checkpoints are still saved under `output/` for reproducibility and debugging.
+- `data/pendulum/...` should only store initialization assets and datasets, not the final runtime model.
 
 ### Verification Stack
 

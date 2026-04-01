@@ -29,7 +29,7 @@ class PendulumDynamics:
         d_theta = theta_dot
         d_theta_dot = (
             (-self.beta / ml2) * theta_dot
-            + (self.g / self.l) * torch.cos(theta)
+            - (self.g / self.l) * torch.sin(theta)
             + u / ml2
         )
         return d_theta_dot
@@ -40,7 +40,7 @@ class PendulumDynamics:
         A = torch.zeros((batch_size, self.nx, self.nx))
         B = torch.zeros((batch_size, self.nx, self.nu))
         A[:, 0, 1] = 1
-        A[:, 1, 0] = self.g / self.l * torch.sin(x[:, 0])
+        A[:, 1, 0] = -self.g / self.l * torch.cos(x[:, 0])
         A[:, 1, 1] = -self.beta / (self.inertia)
         B[:, 1, 0] = 1 / self.inertia
         return A.to(device), B.to(device)

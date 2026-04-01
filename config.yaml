@@ -1,110 +1,69 @@
 user:
-  run_dir: ./output/pendulum_state/${now:%Y-%m-%d}/${now:%H-%M-%S}
+  run_dir: ./output/pendulum_output/${now:%Y-%m-%d}/${now:%H-%M-%S}
   wandb_enabled: false
   wandb_entity: ???
-  load_lyaloss: data/pendulum/state_feedback/lyaloss_init.pth
+  load_lyaloss: null
   Vmin_x_pgd_path: null
   derivative_x_buffer_path: null
-seed: 1234
+wandb_name: pendulum_output
+approximate_lqr: false
+pgd_verifier_steps: 300
 model:
-  load_lyaloss: ${user.load_lyaloss}
-  save_lyaloss: true
-  limit_scale:
-  - 0.1
-  - 0.2
-  - 0.3
-  - 0.4
-  - 0.5
-  - 0.6
-  - 0.7
-  - 0.8
-  - 0.9
-  - 1.0
-  kappa: 0.01
-  V_decrease_within_roa: true
-  V_psd_form: L1
   lyapunov:
-    quadratic: false
+    quadratic: true
     hidden_widths:
     - 16
     - 16
     - 8
-  rho_multiplier: 1.0
-  limit:
-  - 12.0
-  - 12
-  velocity_integration: ExplicitEuler
-  position_integration: ExplicitEuler
-  dt: 0.05
-  controller_nlayer: 4
-  controller_hidden_dim: 8
-  controller_path: data/pendulum/state_feedback/controller_init.pth
-  u_max: 6
+  load_lyaloss: null
+  kappa: 0.1
+  V_decrease_within_roa: false
+  limit_scale: 0.1
+  V_psd_form: L1
+  rho_multiplier:
+  - 2.0
+  - 1.8
+  - 1.6
+  - 1.4
+  u_max: 0.25
+  save_lyaloss: true
 train:
-  train_lyaloss: true
+  train_lyaloss: false
+  Vmin_x_pgd_path: null
+  hard_max: true
+  num_samples_per_boundary: 1024
+  learning_rate: 0.001
+  lr_controller: 0.001
+  batch_size: 100
+  epochs: 40
+  pgd_steps: 50
+  Vmin_x_pgd_buffer_size: 500000
+  buffer_size: 10000
+  samples_per_iter: 100
+  max_iter: 100
+  derivative_x_buffer_path: null
+  lr_scheduler: false
   wandb:
     enabled: ${user.wandb_enabled}
     project: neural_lyapunov_training
     name: ${now:%Y.%m.%d-%H.%M.%S}_${wandb_name}
     dir: ${user.run_dir}
     entity: ${user.wandb_entity}
-  lr_scheduler: false
-  max_iter: 30
-  learning_rate: 0.001
-  lr_controller: 0.001
-  pgd_steps: 150
-  buffer_size: 131072
-  batch_size: 1024
-  epochs: 100
-  samples_per_iter: 16384
-  Vmin_x_pgd_buffer_size: 65536
-  derivative_x_buffer_path: ${user.derivative_x_buffer_path}
-  Vmin_x_pgd_path: ${user.Vmin_x_pgd_path}
   update_Vmin_boundary_per_epoch: false
-  hard_max: true
-  num_samples_per_boundary: 1024
 loss:
+  candidate_scale: 0.6
+  candidate_roa_states_weight: 0
+  l1_reg: 0.001
+  observer_ratio:
+  - 0.0001
+  - 0.0001
+  - 1.0e-05
+  - 1.0e-05
+  always_candidate_roa_regulizer: true
   ibp_ratio_derivative: 0
   sample_ratio_derivative: 1
   ibp_ratio_positivity: 0
   sample_ratio_positivity: 0
   Vmin_x_boundary_weight: 0
   Vmax_x_boundary_weight: 0
-  l1_reg: 0
-  candidate_roa_states_weight: 0
-  candidate_scale: 1.0
-  candidate_roa_states:
-  - - -5.0
-    - 9
-  - - -5.0
-    - 8
-  - - -5.0
-    - 7
-  - - -6.0
-    - 7
-  - - -3
-    - -2.0
-  - - -3
-    - -3.0
-  - - -3
-    - -4.0
-  - - -3
-    - -5.0
-  - - -3
-    - -6.0
-  - - -4
-    - -5.0
-  - - 5.0
-    - -9
-  - - 5.0
-    - -8
-  - - 5.0
-    - -7
-  - - 6.0
-    - -7
-  - - 3.0
-    - 6.0
-  always_candidate_roa_regulizer: false
-wandb_name: pendulum
-approximate_lqr: false
-pgd_verifier_steps: 300
+seed: 1234
