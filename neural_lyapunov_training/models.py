@@ -19,11 +19,6 @@ import neural_lyapunov_training.controllers as controllers
 import neural_lyapunov_training.dynamical_system as dynamical_system
 import neural_lyapunov_training.pendulum as pendulum
 
-
-
-
-
-
 def create_model(
     dynamics,
     controller_parameters=None,

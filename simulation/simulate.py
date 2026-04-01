@@ -1,13 +1,20 @@
+import sys
+
 import mujoco
 import mujoco.viewer
 import time
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
+from pathlib import Path
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 def main():
     model = mujoco.MjModel.from_xml_path(
-        "Kinematics & Actuation/01_single_pendulum/11_Simple_Pendulum/model.xml"
+        str(PROJECT_ROOT / "assets" / "pendulum.xml")
     )
     data = mujoco.MjData(model)
 
@@ -17,12 +24,12 @@ def main():
     mujoco.mj_forward(model, data)
 
     # --- Thông số vật lý & điều khiển ---
-    m    = 1.0
-    l    = 1.0
+    m    = 0.15
+    l    = 0.5
     g    = 9.81
-    b    = 0.01      # Damping (khớp với XML)
+    b    = 0.1      # Damping (khớp với XML)
     k    = 0.5       # Gain bơm năng lượng
-    tmax = 3.0       # Giới hạn torque (N·m)
+    tmax = 0.25       # Giới hạn torque (N·m)
 
     E_desired = m * g * l   # Năng lượng tại homoclinic orbit
 
@@ -77,6 +84,10 @@ def _plot(log_theta, log_theta_dot, log_E, log_time, E_desired, k):
     C_HCLI  = "#EF9F27"
     C_E     = "#1D9E75"
     C_EREF  = "#E24B4A"
+
+    # Create plots directory if it doesn't exist
+    plots_dir = PROJECT_ROOT / "plots"
+    plots_dir.mkdir(exist_ok=True)
 
     fig = plt.figure(figsize=(12, 5), facecolor=BG)
     gs  = gridspec.GridSpec(1, 2, figure=fig, wspace=0.35)
@@ -137,7 +148,7 @@ def _plot(log_theta, log_theta_dot, log_E, log_time, E_desired, k):
     leg2 = ax2.legend(fontsize=9, framealpha=0.85,
                       facecolor=BG, edgecolor=GR, labelcolor=TXT)
 
-    plt.savefig("swingup_analysis.png", dpi=150, bbox_inches="tight",
+    plt.savefig(plots_dir / "swingup_analysis.png", dpi=150, bbox_inches="tight",
                 facecolor=BG)
     plt.show()
 

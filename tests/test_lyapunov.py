@@ -1,3 +1,11 @@
+"""
+Mục tiêu của file này là để kiểm tra tính đúng đắn của các lớp 
+NeuralNetworkLyapunov, NeuralNetworkQuadraticLyapunov, LyapunovPositivityLoss, và LyapunovDerivativeSimpleLoss trong thư viện neural_lyapunov_training. 
+Các bài kiểm tra này đảm bảo rằng các lớp này hoạt động như mong đợi và có thể được sử dụng để huấn luyện các hàm Lyapunov cho hệ thống điều khiển.
+Bằng cách nhập các hệ số và trạng thái mục tiêu cụ thể, chúng ta có thể kiểm tra xem các lớp này có tính toán đúng các giá trị Lyapunov và mất mát liên quan hay không. 
+Điều này giúp đảm bảo rằng các thành phần cơ bản của thư viện neural_lyapunov_training hoạt động chính xác trước khi chúng được sử dụng trong các ứng dụng phức tạp hơn như huấn luyện mạng nơ-ron để ổn định hệ thống điều khiển.
+"""
+
 import typing
 import unittest
 
