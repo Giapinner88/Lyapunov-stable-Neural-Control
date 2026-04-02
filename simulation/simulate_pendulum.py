@@ -87,33 +87,24 @@ def load_neural_modules(device):
 
 def main():
     device = torch.device("cpu")
-    # XML hiện tại: raw q=0 gần buông thõng, raw q=pi gần upright.
     # Quy về frame train bằng theta_norm = wrap_to_pi(theta_raw - pi), để 0 là upright.
     model = mujoco.MjModel.from_xml_path(str(PROJECT_ROOT / "assets" / "pendulum.xml"))
     data = mujoco.MjData(model)
 
     nn_controller, nn_observer = load_neural_modules(device)
 
-    # --- Trạng thái ban đầu: Gần vị trí buông thõng trong frame raw của XML ---
-    data.qpos[0] = 0.3
+    # BALANCE ONLY (upright): khởi tạo gần vị trí thẳng đứng.
+    data.qpos[0] = np.pi + 0.01  # Đặt gần upright một chút để tránh trường hợp PD bị deadzone.
     data.qvel[0] = 0.0
     mujoco.mj_forward(model, data)
 
-    # --- Thông số vật lý chuẩn ---
-    m, l, g, b = 0.15, 0.5, 9.81, 0.1
-    I = m * (l**2) # 0.0375
-    E_desired = m * g * l # Năng lượng tại θ=0 (upright)
-    swingup_gain = 0.9 # Bơm năng lượng mạnh hơn một chút để dễ vào ROA.
-    damping_gain = 0.10 # Giảm damping ngoài ROA để tránh bị kéo ngược quá sớm.
-    recover_k_theta = 0.35 # Giảm lực kéo vị trí để không triệt swing-up.
-    recover_k_omega = 0.30 # Giảm lực hãm vận tốc để bớt "phanh gấp".
-    bleed_k = 0.22 # Hệ số xả bớt năng lượng khi gần upright và dư năng lượng.
-    bleed_theta_band = 0.20
-    bleed_energy_margin = 0.03
-    u_swing_max = 3.0 # Giới hạn torque tối đa khi swing-up, có thể điều chỉnh để tránh quá đà hoặc không đủ lực.
-    # Hysteresis ROA: vào ROA khi |θ|<0.25 và |ω|<0.6, ra ROA khi |θ|<0.5 và |ω|<1.0. Điều chỉnh để tránh bật/tắt mode liên tục gần ranh giới ROA.
-    roa_enter_theta, roa_enter_omega = 0.30, 0.70
-    roa_exit_theta, roa_exit_omega = 0.55, 1.30
+    # Balance-only quanh upright (không swing-up): dùng PD chắc chắn hội tụ trong MuJoCo.
+    # Có thể bật lại NN bằng cách đặt USE_NEURAL_CONTROLLER=True để so sánh.
+    USE_NEURAL_CONTROLLER = True
+    k_p = 2.0
+    k_d = 0.8
+    u_min = float(model.actuator_ctrlrange[0, 0])
+    u_max = float(model.actuator_ctrlrange[0, 1])
     
     control_dt = 0.01
     last_ctrl_time = -control_dt
@@ -126,6 +117,11 @@ def main():
     log = {'time': [], 'theta': [], 'theta_dot': [], 'E': [], 'e_theta': [], 'u': [], 'in_roa': []}
 
     with mujoco.viewer.launch_passive(model, data) as viewer:
+        wide_cam_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_CAMERA, "cam_wide_fixed")
+        if wide_cam_id >= 0:
+            viewer.cam.type = mujoco.mjtCamera.mjCAMERA_FIXED
+            viewer.cam.fixedcamid = wide_cam_id
+
         while viewer.is_running() and data.time < 30.0:
             step_start = time.time()
 
@@ -137,54 +133,29 @@ def main():
 
             # 2. Điều khiển tần số 100Hz (khớp với dt huấn luyện)
             if data.time - last_ctrl_time >= control_dt - 1e-6:
-                y_obs = torch.tensor([[theta_norm]], dtype=torch.float32, device=device)
+                # Năng lượng quanh upright (chỉ để log/debug)
+                m, l, g = 0.15, 0.5, 9.81
+                I = m * (l**2)
                 current_E = 0.5 * I * (theta_dot**2) + m * g * l * np.cos(theta_norm)
-                
-                # Hysteresis ROA để tránh bật/tắt mode liên tục.
-                in_roa_enter = abs(theta_norm) < roa_enter_theta and abs(theta_dot) < roa_enter_omega
-                in_roa_exit = abs(theta_norm) < roa_exit_theta and abs(theta_dot) < roa_exit_omega
 
-                if in_stabilization_mode and not in_roa_exit:
-                    in_stabilization_mode = False
-                elif (not in_stabilization_mode) and in_roa_enter:
-                    in_stabilization_mode = True
-
-                with torch.no_grad():
-                    if in_stabilization_mode:
-                        # NN Output Feedback: u = π(x_hat, y)
+                if USE_NEURAL_CONTROLLER:
+                    # Đường NN giữ nguyên cho mục đích so sánh/ablation.
+                    y_obs = torch.tensor([[theta_norm]], dtype=torch.float32, device=device)
+                    with torch.no_grad():
                         nn_input = torch.cat([x_hat, y_obs], dim=1)
                         u_tensor = nn_controller(nn_input)
-                        tau_applied = u_tensor.item()
-                        
-                        # Cập nhật Observer: x_hat+ = f(x_hat, u, y)
-                        x_hat = nn_observer(x_hat, u_tensor, y_obs)
-                    else:
-                        # Ngoài ROA: swing-up + damping + recover để giảm quá đà.
-                        u_energy = swingup_gain * theta_dot * (E_desired - current_E)
-                        u_damping = -damping_gain * theta_dot
-
-                        near_upright = abs(theta_norm) < 0.75
-                        excess_energy = current_E - E_desired
-                        moving_away_from_upright = (theta_norm * theta_dot) > 0.0
-                        need_recover = near_upright and moving_away_from_upright and (
-                            excess_energy > 0.12 or abs(theta_dot) > 1.3
+                        tau_applied = float(np.clip(u_tensor.item(), u_min, u_max))
+                        x_hat = nn_observer(
+                            x_hat,
+                            torch.tensor([[tau_applied]], dtype=torch.float32, device=device),
+                            y_obs,
                         )
-
-                        if need_recover:
-                            u_recover = -recover_k_theta * theta_norm - recover_k_omega * theta_dot
-                            tau_applied = 0.35 * u_energy + u_damping + u_recover
-                        else:
-                            tau_applied = u_energy + 0.5 * u_damping
-
-                        # Energy bleed nhỏ gần upright để tránh lặp vượt năng lượng rồi bật ra khỏi ROA.
-                        if abs(theta_norm) < bleed_theta_band and excess_energy > bleed_energy_margin:
-                            u_bleed = -bleed_k * theta_dot
-                            tau_applied += u_bleed
-
-                        tau_applied = np.clip(tau_applied, -u_swing_max, u_swing_max)
-                        
-                        # Bám đuổi trạng thái thực khi ngoài ROA
-                        x_hat = torch.tensor([[theta_norm, theta_dot]], dtype=torch.float32, device=device)
+                    in_stabilization_mode = True
+                else:
+                    # Balance-only upright: PD quanh theta_norm=0.
+                    tau_applied = np.clip(-k_p * theta_norm - k_d * theta_dot, u_min, u_max)
+                    x_hat = torch.tensor([[theta_norm, theta_dot]], dtype=torch.float32, device=device)
+                    in_stabilization_mode = True
 
                 last_ctrl_time = data.time
                 log['time'].append(data.time)
