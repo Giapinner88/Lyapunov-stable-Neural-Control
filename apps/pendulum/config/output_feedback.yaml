@@ -1,7 +1,7 @@
 defaults:
   - user: output_feedback_default
-  - _self_
   - train_template
+  - _self_
 
 hydra:
   run:
