@@ -5,6 +5,7 @@
         <light pos="0 -2 3" dir="0 1 -1" directional="true" castshadow="true"/>
         <geom name="floor" type="plane" size="2 2 0.1" rgba="0.8 0.9 0.8 1" contype="1" conaffinity="1"/>
         <camera name="cam_side" pos="0 -3 1.0" quat="0.7071 0.7071 0 0"/>
+        <camera name="cam_wide_fixed" pos="0 -2.5 1.4" quat="0.7071 0.7071 0 0" fovy="95"/>
         
         <body name="pivot" pos="0 0 1.0">
             <geom type="cylinder" size="0.05 0.1" rgba="0.1 0.1 0.9 1" quat="0.7071 0.7071 0 0"/>
