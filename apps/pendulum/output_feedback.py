@@ -444,8 +444,10 @@ def main(cfg: DictConfig):
         derivative_lyaloss_check, 1400, x0, z0
     )
     e_traj = x_traj - z_traj
-    idx = V_traj[100, :] <= rho
-    V_traj = V_traj[:, idx]
+    in_rho_100 = V_traj[100, :] <= rho
+    in_rho_final = V_traj[-1, :] <= rho
+    success_rate_100 = float(np.mean(in_rho_100))
+    success_rate_final = float(np.mean(in_rho_final))
 
     # Plot V trajectories with summary statistics for better readability.
     fig_v, ax_v = plt.subplots(figsize=(10, 6))
@@ -454,26 +456,39 @@ def main(cfg: DictConfig):
     )
     time_axis = dt * np.arange(V_traj_np.shape[0])
     if V_traj_np.shape[1] > 0:
-        ax_v.plot(
-            time_axis,
-            V_traj_np[:, :: max(1, V_traj_np.shape[1] // 20)],
-            alpha=0.2,
-        )
+        success_idx = np.asarray(in_rho_100)
+        fail_idx = ~success_idx
+        if success_idx.any():
+            ax_v.plot(
+                time_axis,
+                V_traj_np[:, success_idx],
+                color="#2B9E8F",
+                alpha=0.22,
+                linewidth=0.8,
+            )
+        if fail_idx.any():
+            ax_v.plot(
+                time_axis,
+                V_traj_np[:, fail_idx],
+                color="#ff6b6b",
+                alpha=0.22,
+                linewidth=0.8,
+            )
         V_mean = V_traj_np.mean(axis=1)
         V_median = np.median(V_traj_np, axis=1)
-        ax_v.plot(time_axis, V_mean, color="tab:blue", linewidth=2.0, label="mean V")
+        ax_v.plot(time_axis, V_mean, color="tab:blue", linewidth=2.0, label="mean V (all)")
         ax_v.plot(
             time_axis,
             V_median,
             color="tab:orange",
             linewidth=2.0,
             linestyle="--",
-            label="median V",
+            label="median V (all)",
         )
     ax_v.axhline(rho, color="tab:red", linestyle=":", linewidth=1.8, label=f"rho={rho:.4g}")
     ax_v.set_xlabel("time (s)")
     ax_v.set_ylabel("V(x)")
-    ax_v.set_title("Lyapunov trajectories in simulation")
+    ax_v.set_title("Lyapunov trajectories in simulation (no filtering)")
     ax_v.grid(alpha=0.3)
     ax_v.legend(loc="upper right")
     ax_v.text(
@@ -482,7 +497,9 @@ def main(cfg: DictConfig):
         (
             f"max violation={max_adv_violation:.3e}\n"
             f"total violation={adv_output.sum().item():.3e}\n"
-            f"kept trajectories={V_traj_np.shape[1]}"
+            f"success@t=100={success_rate_100:.1%}\n"
+            f"success@final={success_rate_final:.1%}\n"
+            f"trajectories={V_traj_np.shape[1]}"
         ),
         transform=ax_v.transAxes,
         va="top",
@@ -501,7 +518,7 @@ def main(cfg: DictConfig):
     # Helper to plot 2D Lyapunov slice with gradient expansion, vector field, trajectories
     def plot_lyapunov_2d_slice(
         ax, lyapunov_nn, lower_lim, upper_lim, traj_2d,
-        label_indices, rho_val, phase_name, device, grid_sz=280
+        label_indices, rho_val, phase_name, device, traj_success_mask=None, grid_sz=280
     ):
         """Plot 2D heatmap + ROA expansion + vector field + trajectories."""
         lim_lo = lower_lim[label_indices].cpu().numpy()
@@ -592,8 +609,17 @@ def main(cfg: DictConfig):
             for i in range(0, traj_2d.shape[1], stride):
                 traj_pt = traj_2d[:, i, :]
                 traj_np = traj_pt.cpu().numpy() if torch.is_tensor(traj_pt) else np.asarray(traj_pt)
-                ax.plot(traj_np[:, 0], traj_np[:, 1], color="#ffffff", linewidth=0.8, alpha=0.35, zorder=5)
-                ax.plot(traj_np[0, 0], traj_np[0, 1], 'o', color="#D9FF00", markersize=2.5, alpha=0.5, zorder=6)
+                if traj_success_mask is None:
+                    traj_color = "#ffffff"
+                    start_color = "#D9FF00"
+                    alpha = 0.35
+                else:
+                    is_success = bool(traj_success_mask[i])
+                    traj_color = "#2B9E8F" if is_success else "#ff6b6b"
+                    start_color = traj_color
+                    alpha = 0.40
+                ax.plot(traj_np[:, 0], traj_np[:, 1], color=traj_color, linewidth=0.9, alpha=alpha, zorder=5)
+                ax.plot(traj_np[0, 0], traj_np[0, 1], 'o', color=start_color, markersize=2.5, alpha=0.7, zorder=6)
 
         # Equilibrium
         ax.plot(0, 0, '*', color='#ff3333', markersize=12, zorder=7,
@@ -608,7 +634,7 @@ def main(cfg: DictConfig):
         ax.set_xlabel(labels[label_indices[0]], fontsize=fs(11))
         ax.set_ylabel(labels[label_indices[1]], fontsize=fs(11))
         ax.set_title(
-            rf"Lyapunov {phase_name} | $\rho$ = {rho_val:.4g} | $\kappa$ = {kappa}",
+            rf"Lyapunov {phase_name} | $\rho$ = {rho_val:.4g} | $\kappa$ = {kappa} | closed-loop NN rollouts",
             fontsize=fs(12)
         )
         ax.set_xlim(xl, xu)
@@ -628,10 +654,12 @@ def main(cfg: DictConfig):
         ax = fig.add_subplot(111)
         if plot_idx == [0, 1]:
             plot_lyapunov_2d_slice(ax, lyapunov_nn, lower_limit, upper_limit,
-                                  x_traj_2d, plot_idx, rho, "state space", device, grid_sz=280)
+                                  x_traj_2d, plot_idx, rho, "state space", device,
+                                  traj_success_mask=in_rho_100, grid_sz=280)
         else:
             plot_lyapunov_2d_slice(ax, lyapunov_nn, lower_limit, upper_limit,
-                                  e_traj_2d, plot_idx, rho, "error space", device, grid_sz=280)
+                                  e_traj_2d, plot_idx, rho, "error space", device,
+                                  traj_success_mask=in_rho_100, grid_sz=280)
         fig.tight_layout()
         fig.savefig(plot_dir / f"V_{kappa}_{str(plot_idx)}.png", dpi=180)
         plt.close(fig)
