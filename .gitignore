@@ -12,3 +12,4 @@ models/lyaloss*
 verification/specs/bisect*.*
 verification/out*
 /alpha-beta-CROWN
+/debug
