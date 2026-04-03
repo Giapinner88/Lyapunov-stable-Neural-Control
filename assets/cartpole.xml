@@ -1,0 +1,46 @@
+<mujoco model="cartpole_phase_space">
+    <option timestep="0.005" integrator="RK4" gravity="0 0 -9.81"/>
+
+    <asset>
+        <material name="mat_red" rgba="0.8 0.2 0.2 1"/>
+        <material name="mat_blue" rgba="0.2 0.3 0.8 1"/>
+        <material name="mat_green" rgba="0.2 0.7 0.2 1"/>
+    </asset>
+
+    <worldbody>
+        <light pos="0 -2 3" dir="0 1 -1" directional="true" castshadow="true"/>
+        <geom name="floor" type="plane" size="2 2 0.1" rgba="0.8 0.9 0.8 1" contype="1" conaffinity="1"/>
+        <camera name="cam_side" pos="0 -3 1.0" quat="0.7071 0.7071 0 0"/>
+        <camera name="cam_wide_fixed" pos="0 -2.5 1.4" quat="0.7071 0.7071 0 0" fovy="95"/>
+        
+        <body name="cartpole" pos="0 0 1.0"> 
+            <joint name="base_x" type="slide" axis="1 0 0" range="-20 20" damping="0.5" frictionloss="0"/>
+            
+            <inertial pos="0 0 0" mass="1.0" diaginertia="0.00167 0.00167 0.00167"/>
+            <geom name="base" type="box" size="0.1 0.1 0.1" material="mat_red"/>
+            
+            <body name="pole" pos="0 0 0">
+                <joint name="j1" type="hinge" axis="0 1 0" damping="0.1"/>
+                <inertial pos="0 0 0.25" mass="1.350000" diaginertia="0.0281250000 0.0281250000 0.0002148592"/>
+                <geom name="link" type="cylinder" fromto="0 0 0 0 0 0.5" size="0.0178" material="mat_blue"/>
+                <!-- <geom name="ball_tip" type="sphere" pos="0 0 0.5" size="0.05" material="mat_red"/> -->
+                <site name="tip_site" pos="0 0 0.5" size="0.01" rgba="1 1 0 1"/>
+            </body>
+        </body>
+    </worldbody>
+
+    <actuator>
+        <motor joint="base_x" gear="1" ctrlrange="-100 100" forcerange="-100 100"/>
+    </actuator>
+
+    <sensor>
+        <jointpos name="s_cart_pos" joint="base_x"/>
+        <jointvel name="s_cart_vel" joint="base_x"/>
+        
+        <jointpos name="s_j1_pos" joint="j1"/>
+        <jointvel name="s_j1_vel" joint="j1"/>
+
+        <framepos name="s_tip_pos" objtype="site" objname="tip_site"/>
+        <framelinvel name="s_tip_vel" objtype="site" objname="tip_site"/>
+    </sensor>
+</mujoco>
