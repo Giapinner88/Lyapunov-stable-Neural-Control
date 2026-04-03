@@ -443,7 +443,13 @@ def main(cfg: DictConfig):
     x_traj, z_traj, V_traj = output_train_utils.simulate(
         derivative_lyaloss_check, 1400, x0, z0
     )
-    e_traj = x_traj - z_traj
+    
+    # Handle potential overflow in e_traj computation
+    with np.errstate(over='ignore', invalid='ignore'):  # Suppress overflow warnings
+        e_traj = x_traj - z_traj
+        # Replace any inf/nan with max safe value
+        e_traj = np.nan_to_num(e_traj, nan=1e6, posinf=1e6, neginf=-1e6)
+    
     in_rho_100 = V_traj[100, :] <= rho
     in_rho_final = V_traj[-1, :] <= rho
     success_rate_100 = float(np.mean(in_rho_100))
