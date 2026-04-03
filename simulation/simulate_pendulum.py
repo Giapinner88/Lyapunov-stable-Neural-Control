@@ -23,15 +23,15 @@ def load_neural_modules(device):
     pendulum_continuous = PendulumDynamics(m=0.15, l=0.5, beta=0.1)
     dynamics = SecondOrderDiscreteTimeSystem(pendulum_continuous, dt=0.01)
 
-    # Controller output-feedback luôn bị clamp theo giới hạn đã train (±0.25)
+    # Controller mujoco-feedback clamp theo giới hạn đồng bộ với MuJoCo XML (±1).
     controller = NeuralNetworkController(
         nlayer=4,
         in_dim=3,
         out_dim=1,
         hidden_dim=8,
         clip_output="clamp",
-        u_lo=torch.tensor([-0.25]),
-        u_up=torch.tensor([0.25]),
+        u_lo=torch.tensor([-1.0]),
+        u_up=torch.tensor([1.0]),
         x_equilibrium=torch.zeros(3),
         u_equilibrium=torch.zeros(1),
     ).to(device)
@@ -46,42 +46,29 @@ def load_neural_modules(device):
         fc_hidden_dim=[8, 8],
     ).to(device)
 
-    model_path = PROJECT_ROOT / "models" / "pendulum_output_feedback.pth"
-    if os.path.exists(model_path):
-        ckpt = torch.load(model_path, map_location=device, weights_only=False)
-        if "controller_state_dict" in ckpt and "observer_state_dict" in ckpt:
-            controller_state_dict = ckpt["controller_state_dict"]
-            observer_state_dict = ckpt["observer_state_dict"]
-        elif "state_dict" in ckpt:
-            controller_state_dict = {
-                k.replace("controller.", ""): v
-                for k, v in ckpt["state_dict"].items()
-                if k.startswith("controller.")
-            }
-            observer_state_dict = {
-                k.replace("observer.", ""): v
-                for k, v in ckpt["state_dict"].items()
-                if k.startswith("observer.")
-            }
-        else:
-            raise RuntimeError(
-                f"Checkpoint format khong hop le: {model_path}. "
-                "Can it nhat 'state_dict' hoac cap keys 'controller_state_dict'/'observer_state_dict'."
-            )
-
-        if len(controller_state_dict) == 0 or len(observer_state_dict) == 0:
-            raise RuntimeError(
-                f"Checkpoint tai {model_path} khong chua trong so controller/observer. "
-                "Hay chay lai apps/pendulum/output_feedback.py de tao checkpoint day du."
-            )
-
-        controller.load_state_dict(controller_state_dict)
-        observer.load_state_dict(observer_state_dict)
-        print(f"✓ Đã nạp trọng số từ {model_path}")
-    else:
-        print(f"⚠ Cảnh báo: Model file không tìm thấy tại {model_path}")
-
-    controller.eval()
+    # Try to load observer trained specifically for MuJoCo surrogate dynamics
+    observer_mujoco_path = PROJECT_ROOT / "models" / "mujoco_feedback" / "observer_mujoco_surrogate_[8,8].pth"
+    observer_legacy_path = PROJECT_ROOT / "models" / "mujoco_feedback" / "pendulum_mujoco_feedback.pth"
+    
+    observer_loaded = False
+    if observer_mujoco_path.exists():
+        print(f"✓ Loading observer trained for MuJoCo surrogate: {observer_mujoco_path}")
+        ckpt = torch.load(observer_mujoco_path, map_location=device, weights_only=False)
+        if "observer_state_dict" in ckpt:
+            observer.load_state_dict(ckpt["observer_state_dict"])
+            observer_loaded = True
+    
+    if not observer_loaded and observer_legacy_path.exists():
+        print(f"⚠ Observer-specific checkpoint not found, using legacy checkpoint: {observer_legacy_path}")
+        ckpt = torch.load(observer_legacy_path, map_location=device, weights_only=False)
+        if "observer_state_dict" in ckpt:
+            observer.load_state_dict(ckpt["observer_state_dict"])
+            observer_loaded = True
+    
+    if not observer_loaded:
+        print(f"⚠ No observer checkpoint found. Using random initialization.")
+        print(f"   Recommendation: Train observer with 'python apps/pendulum/mujoco_feedback.py train_observer'")
+    
     observer.eval()
     return controller, observer
 
