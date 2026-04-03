@@ -344,15 +344,24 @@ def approximate_lyapunov_nn(
 
 def simulate(lyaloss: lyapunov.LyapunovDerivativeDOFLoss, steps: int, x0, z0):
     # Assumes explicit euler integration.
+    import warnings
+    import numpy as np
+    
     x_traj = [None] * steps
     z_traj = [None] * steps
     V_traj = [None] * steps
     x_traj[0] = x0
     z_traj[0] = z0
+    
+    # Safeguard: max reasonable value to prevent overflow (float64 overflow ~1.8e308)
+    max_value = 1e6  # Large but safe threshold for physical trajectories
+    
     with torch.no_grad():
         V_traj[0] = lyaloss.lyapunov(
             torch.cat((x_traj[0], x_traj[0] - z_traj[0]), dim=1)
         )
+        diverged_steps = 0
+        
         for i in range(1, steps):
             y = lyaloss.observer.h(x_traj[i - 1])
             z = z_traj[i - 1]
@@ -361,12 +370,36 @@ def simulate(lyaloss: lyapunov.LyapunovDerivativeDOFLoss, steps: int, x0, z0):
             )
             x_traj[i] = lyaloss.dynamics.forward(x_traj[i - 1], u)
             z_traj[i] = lyaloss.observer.forward(z, u, y)
+            
+            # Check for divergence (NaN or extremely large values)
+            x_max = torch.abs(x_traj[i]).max().item()
+            z_max = torch.abs(z_traj[i]).max().item()
+            
+            if torch.isnan(x_traj[i]).any() or torch.isnan(z_traj[i]).any():
+                warnings.warn(f"NaN detected at step {i}, clamping trajectory")
+                x_traj[i] = torch.clamp(x_traj[i], -max_value, max_value)
+                z_traj[i] = torch.clamp(z_traj[i], -max_value, max_value)
+                diverged_steps += 1
+            elif x_max > max_value or z_max > max_value:
+                warnings.warn(f"Trajectory diverging at step {i} (x_max={x_max:.2e}, z_max={z_max:.2e}), clamping")
+                x_traj[i] = torch.clamp(x_traj[i], -max_value, max_value)
+                z_traj[i] = torch.clamp(z_traj[i], -max_value, max_value)
+                diverged_steps += 1
+            
             V_traj[i] = lyaloss.lyapunov(
                 torch.cat((x_traj[i], x_traj[i] - z_traj[i]), dim=1)
             )
+        
+        if diverged_steps > 0:
+            warnings.warn(f"Trajectory diverged at {diverged_steps} steps out of {steps}")
 
-    return (
-        torch.stack(x_traj).cpu().detach().numpy(),
-        torch.stack(z_traj).cpu().detach().numpy(),
-        torch.stack(V_traj).cpu().detach().numpy().squeeze(),
-    )
+    # Convert with float64 to preserve precision and handle large values
+    x_numpy = torch.stack(x_traj).cpu().detach().numpy()
+    z_numpy = torch.stack(z_traj).cpu().detach().numpy()
+    V_numpy = torch.stack(V_traj).cpu().detach().numpy().squeeze()
+    
+    # Handle potential inf/nan in numpy arrays before subtraction
+    x_numpy = np.nan_to_num(x_numpy, nan=max_value, posinf=max_value, neginf=-max_value)
+    z_numpy = np.nan_to_num(z_numpy, nan=max_value, posinf=max_value, neginf=-max_value)
+    
+    return x_numpy, z_numpy, V_numpy
