@@ -55,7 +55,9 @@ def load_lyapunov_and_controller(device, load_controllers=False):
         # Khởi tạo Controller
         controller = NeuralNetworkController(
             in_dim=3, out_dim=1, hidden_dim=8, nlayer=4, clip_output="clamp",
-            u_lo=torch.tensor([-0.25]), u_up=torch.tensor([0.25]),
+            # MuJoCo pendulum.xml uses actuator ctrlrange [-1, 1].
+            # Đổi lại 0.25 nếu khảo sát output-feedback đã train, hoặc giữ ±1 nếu khảo sát mujoco-feedback.
+            u_lo=torch.tensor([-1.0]), u_up=torch.tensor([1.0]),
             x_equilibrium=torch.zeros(3), u_equilibrium=torch.zeros(1)
         ).to(device)
         
