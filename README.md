@@ -89,24 +89,78 @@ project-root/
 
 ## Installation
 
-Create a conda environment and install the dependencies except those for verification:
+The root `requirements.txt` now contains the full dependency set for:
+- training and simulation,
+- testing,
+- verification (alpha-beta-CROWN / complete_verifier).
+
+### 1) Clone repository (with submodules)
+
 ```bash
-conda create --name lnc python=3.11
-conda activate lnc
+git clone --recursive <YOUR_REPO_URL>
+cd Lyapunov-stable-Neural-Control
+```
+
+If you already cloned without submodules:
+
+```bash
+git submodule update --init --recursive
+```
+
+### 2) Create and activate Conda environment
+
+```bash
+conda create -n fip python=3.11 -y
+conda activate fip
+python -m pip install --upgrade pip
+```
+
+### 3) Install all Python dependencies
+
+```bash
 pip install -r requirements.txt
 ```
 
-We use [auto_LiRPA](https://github.com/Verified-Intelligence/auto_LiRPA.git) and [alpha-beta-CROWN](https://github.com/Verified-Intelligence/alpha-beta-CROWN.git) for verification. To install both of them, run:
+### 4) Install this repository as a package
+
+From the repository root:
+
 ```bash
-git clone --recursive https://github.com/Verified-Intelligence/alpha-beta-CROWN.git
-(cd alpha-beta-CROWN/auto_LiRPA && pip install -e .)
-(cd alpha-beta-CROWN/complete_verifier && pip install -r requirements.txt)
+pip install -e .
 ```
 
-To set up the path:
+This enables imports like `import neural_lyapunov_training` from anywhere in the env.
+
+### 5) Install verification subpackages (editable)
+
+```bash
+pip install -e alpha-beta-CROWN/auto_LiRPA
+pip install -e alpha-beta-CROWN/complete_verifier
 ```
+
+### 6) Set PYTHONPATH for verifier scripts
+
+```bash
 export PYTHONPATH="${PYTHONPATH}:$(pwd):$(pwd)/alpha-beta-CROWN:$(pwd)/alpha-beta-CROWN/complete_verifier"
 ```
+
+To keep this persistent for future shells:
+
+```bash
+echo 'export PYTHONPATH="${PYTHONPATH}:$(pwd):$(pwd)/alpha-beta-CROWN:$(pwd)/alpha-beta-CROWN/complete_verifier"' >> ~/.bashrc
+```
+
+### 7) Quick sanity checks
+
+```bash
+python -c "import torch, hydra, mujoco, neural_lyapunov_training; print('OK')"
+python -m pytest -q
+```
+
+### Notes
+
+- `gurobipy` is included in `requirements.txt` for full verification support. You still need a valid Gurobi license to run Gurobi-backed verification.
+- If you use GPU PyTorch, install your CUDA-specific torch build first (from official PyTorch instructions), then run `pip install -r requirements.txt`.
 
 ## Verification
 
